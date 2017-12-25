@@ -2,10 +2,7 @@ package org.apache.calcite.adapter.arrow;
 
 import org.apache.calcite.DataContext;
 import org.apache.calcite.adapter.java.JavaTypeFactory;
-import org.apache.calcite.linq4j.AbstractEnumerable;
-import org.apache.calcite.linq4j.Enumerable;
-import org.apache.calcite.linq4j.QueryProvider;
-import org.apache.calcite.linq4j.Queryable;
+import org.apache.calcite.linq4j.*;
 import org.apache.calcite.linq4j.tree.Expression;
 import org.apache.calcite.plan.RelOptTable;
 import org.apache.calcite.rel.RelNode;
@@ -39,24 +36,25 @@ public class ArrowTable extends AbstractTable implements QueryableTable, Transla
         if (this.tProtoRowType != null) {
             return this.tProtoRowType.apply(typeFactory);
         }
-        return ArrowEmumerator.deduceRowType(this.vectorSchemaRoots, (JavaTypeFactory)typeFactory);
+        return ArrowEnumerator.deduceRowType(this.vectorSchemaRoots[0], (JavaTypeFactory)typeFactory);
     }
 
     public Enumerable<Object> project(DataContext root, final int[] fields) {
         return new AbstractEnumerable<Object>() {
             @Override
-            public Enumerable<Object> enumerator() {
+            public Enumerator<Object> enumerator() {
                 return new ArrowEnumerator(vectorSchemaRoots, fields);
             }
         };
     }
 
-    public Expression getExpression(SchemaPlus schema, String tableName, Class<?> clazz) {
-       return Schemas.tableExpression(schema, getElementType(), tableName, clazz);
-    }
-
     public Type getElementType() {
         return Object[].class;
+    }
+
+    @Override
+    public Expression getExpression(SchemaPlus schema, String tableName, Class clazz) {
+        return null;
     }
 
     public <T> Queryable<T> asQueryable(QueryProvider queryProvider, SchemaPlus schema, String tableName) {

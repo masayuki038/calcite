@@ -1,13 +1,18 @@
 package org.apache.calcite.adapter.arrow;
 
+import org.apache.calcite.adapter.java.JavaTypeFactory;
 import org.apache.calcite.linq4j.Enumerator;
 
 import org.apache.arrow.vector.VectorSchemaRoot;
 import org.apache.arrow.vector.FieldVector;
+import org.apache.calcite.rel.type.RelDataType;
+import org.apache.calcite.util.Pair;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Arrays;
+import java.util.List;
+import java.util.stream.Collectors;
 
 
 /**
@@ -30,6 +35,14 @@ public class ArrowEnumerator implements Enumerator<Object> {
 
     public ArrowEnumerator(VectorSchemaRoot[] vectorSchemaRoots) {
         this(vectorSchemaRoots, EnumerableUtils.identityList(vectorSchemaRoots[0].getFieldVectors().size()));
+    }
+
+    public static RelDataType deduceRowType(VectorSchemaRoot vectorSchemaRoot, JavaTypeFactory typeFactory) {
+        List<Pair<String, RelDataType>> ret = vectorSchemaRoot.getFieldVectors().stream().map(fieldVector -> {
+            RelDataType relDataType = ArrowFieldType.of(fieldVector.getField().getType()).toType(typeFactory);
+            return new Pair<String, RelDataType>(fieldVector.getField().getName(), relDataType);
+        }).collect(Collectors.toList());
+        return typeFactory.createStructType(ret);
     }
 
     @Override
