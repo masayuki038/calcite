@@ -11,7 +11,7 @@ import org.slf4j.LoggerFactory;
 import java.util.Arrays;
 
 /**
- * Created by masayuki on 2017/12/24.
+ * Multiple Fields Enumerator
  */
 public class ArrowArrayEnumerator implements Enumerator<Object[]> {
 

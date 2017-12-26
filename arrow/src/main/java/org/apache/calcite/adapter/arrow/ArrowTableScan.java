@@ -19,7 +19,7 @@ import java.util.Arrays;
 import java.util.List;
 
 /**
- * Created by masayuki on 2017/12/25.
+ * TableScan for Apache Arrow
  */
 public class ArrowTableScan extends TableScan implements EnumerableRel {
 

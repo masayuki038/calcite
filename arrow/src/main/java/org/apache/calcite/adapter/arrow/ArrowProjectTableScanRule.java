@@ -31,7 +31,6 @@ public class ArrowProjectTableScanRule extends RelOptRule {
         final ArrowTableScan scan = call.rel(1);
         int[] fields = getProjectFields(project.getProjects());
         if (fields == null) {
-            // Project contains expressions more complex than just field references.
             return;
         }
         call.transformTo(

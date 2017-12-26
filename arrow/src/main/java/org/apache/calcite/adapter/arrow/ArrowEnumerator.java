@@ -16,7 +16,7 @@ import java.util.stream.Collectors;
 
 
 /**
- * Created by masayuki on 2017/12/24.
+ * Single Field Enumerator
  */
 public class ArrowEnumerator implements Enumerator<Object> {
 

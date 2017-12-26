@@ -10,7 +10,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * Created by masayuki on 2017/12/25.
+ * Field Type for Apache Arrow
  */
 enum ArrowFieldType {
     STRING(String.class, "string"),
