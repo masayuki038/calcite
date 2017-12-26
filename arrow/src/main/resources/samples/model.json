@@ -5,9 +5,9 @@
     {
       "name": "SAMPLES",
       "type": "custom",
-      "factory": "net.wrap_trap.calcite_arrow_sample.ArrowSchemaFactory",
+      "factory": "org.apache.calcite.adapter.arrow.ArrowSchemaFactory",
       "operand": {
-        "directory": "samples"
+        "directory": "files"
       }
     }
   ]

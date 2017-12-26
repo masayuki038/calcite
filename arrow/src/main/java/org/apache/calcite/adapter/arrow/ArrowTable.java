@@ -54,7 +54,7 @@ public class ArrowTable extends AbstractTable implements QueryableTable, Transla
 
     @Override
     public Expression getExpression(SchemaPlus schema, String tableName, Class clazz) {
-        return null;
+        return Schemas.tableExpression(schema, getElementType(), tableName, clazz);
     }
 
     public <T> Queryable<T> asQueryable(QueryProvider queryProvider, SchemaPlus schema, String tableName) {

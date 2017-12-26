@@ -57,6 +57,6 @@ enum ArrowFieldType {
     }
 
     public static ArrowFieldType of(ArrowType arrowType) {
-        return MAP.get(arrowType);
+        return MAP.get(arrowType.getClass());
     }
 }
