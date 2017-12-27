@@ -11,7 +11,7 @@ import org.apache.calcite.tools.RelBuilderFactory;
 import java.util.List;
 
 /**
- * Created by masayuki on 2017/12/25.
+ * Project scan rule for Apache Arrow
  */
 public class ArrowProjectTableScanRule extends RelOptRule {
 
