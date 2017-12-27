@@ -15,6 +15,8 @@ import org.apache.calcite.rex.RexProgramBuilder;
  */
 public class ArrowFilterTableScanRule extends RelOptRule {
 
+    public static ArrowFilterTableScanRule INSTANCE = new ArrowFilterTableScanRule();
+
     public ArrowFilterTableScanRule() {
         super(operand(EnumerableFilter.class, any()));
     }

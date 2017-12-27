@@ -59,6 +59,7 @@ public class ArrowTableScan extends TableScan implements EnumerableRel {
     @Override
     public void register(RelOptPlanner planner) {
         planner.addRule(ArrowProjectTableScanRule.INSTANCE);
+        planner.addRule(ArrowFilterTableScanRule.INSTANCE);
     }
 
     public Result implement(EnumerableRelImplementor implementor, Prefer pref) {
