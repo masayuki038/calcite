@@ -2,13 +2,9 @@ package org.apache.calcite.adapter.arrow;
 
 import org.apache.calcite.adapter.enumerable.EnumerableCalc;
 import org.apache.calcite.adapter.enumerable.EnumerableFilter;
-import org.apache.calcite.linq4j.Enumerable;
 import org.apache.calcite.plan.RelOptRule;
 import org.apache.calcite.plan.RelOptRuleCall;
-import org.apache.calcite.plan.RelOptRuleOperand;
 import org.apache.calcite.rel.RelNode;
-import org.apache.calcite.rel.logical.LogicalFilter;
-import org.apache.calcite.rel.logical.LogicalProject;
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rex.RexBuilder;
 import org.apache.calcite.rex.RexProgram;
@@ -31,7 +27,7 @@ public class ArrowFilterTableScanRule extends RelOptRule {
         final RexBuilder rexBuilder = filter.getCluster().getRexBuilder();
         final RelDataType inputRowType = input.getRowType();
         final RexProgramBuilder programBuilder = new RexProgramBuilder(inputRowType, rexBuilder);
-        programBuilder.addIdentity();;
+        programBuilder.addIdentity();
         programBuilder.addCondition(filter.getCondition());
         final RexProgram program = programBuilder.getProgram();
 
