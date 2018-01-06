@@ -21,7 +21,7 @@ import java.util.List;
 /**
  * TableScan for Apache Arrow
  */
-public class ArrowTableScan extends TableScan implements EnumerableRel {
+public class ArrowTableScan extends TableScan implements ArrowRel {
 
     private RelOptTable relOptTable;
     private ArrowTable arrowTable;
@@ -32,7 +32,7 @@ public class ArrowTableScan extends TableScan implements EnumerableRel {
     }
 
     public ArrowTableScan(RelOptCluster cluster, RelOptTable relOptTable, ArrowTable arrowTable, int[] fields) {
-        super(cluster, cluster.traitSetOf(EnumerableConvention.INSTANCE), relOptTable);
+        super(cluster, cluster.traitSetOf(ArrowRel.CONVENTION), relOptTable);
         this.relOptTable = relOptTable;
         this.arrowTable = arrowTable;
         this.fields = fields;
@@ -58,11 +58,12 @@ public class ArrowTableScan extends TableScan implements EnumerableRel {
 
     @Override
     public void register(RelOptPlanner planner) {
+        planner.addRule(ArrowToEnumerableConverterRule.INSTANCE);
         planner.addRule(ArrowProjectTableScanRule.INSTANCE);
         planner.addRule(ArrowFilterTableScanRule.INSTANCE);
     }
 
-    public Result implement(EnumerableRelImplementor implementor, Prefer pref) {
+    public EnumerableRel.Result implement(Implementor implementor, EnumerableRel.Prefer pref) {
         PhysType physType = PhysTypeImpl.of(implementor.getTypeFactory(), getRowType(), pref.preferArray());
         return implementor.result(physType, Blocks.toBlock(
                 Expressions.call(
