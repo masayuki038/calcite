@@ -18,7 +18,7 @@ import java.util.stream.Collectors;
 /**
  * Single Field Enumerator
  */
-public class ArrowEnumerator implements Enumerator<Object> {
+public class ArrowEnumerator implements Enumerator<Object>, VectorSchemaRootContainer {
 
     private Logger logger = LoggerFactory.getLogger(ArrowEnumerator.class);
 
@@ -81,5 +81,19 @@ public class ArrowEnumerator implements Enumerator<Object> {
             return "NULL";
         }
         return fieldVector.getAccessor().getObject(this.currentPos);
+    }
+
+    @Override
+    public int getVectorSchemaRootCount() {
+        return vectorSchemaRoots.length;
+    }
+
+    @Override
+    public int getRowCount(int index) {
+        return vectorSchemaRoots[index].getRowCount();
+    }
+
+    public FieldVector getFieldVector(int index, int fieldIndex) {
+        return vectorSchemaRoots[index].getFieldVectors().get(fieldIndex);
     }
 }

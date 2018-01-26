@@ -12,10 +12,21 @@ import java.util.stream.IntStream;
 public class JdbcTest {
 
     @Test
-    public void query() throws SQLException, ClassNotFoundException {
+    public void filter() throws SQLException, ClassNotFoundException {
         Class.forName("org.apache.calcite.jdbc.Driver");
         try(Connection conn = DriverManager.getConnection("jdbc:calcite:model=target/classes/samples/model.json", "admin", "admin")) {
             PreparedStatement pstmt = conn.prepareStatement("select N_NATIONKEY, N_NAME from NATIONSSF WHERE N_REGIONKEY=?");
+            pstmt.setLong(1, 1L);
+            ResultSet rs = pstmt.executeQuery();
+            resultSetPrint(rs);
+        }
+    }
+
+    @Test
+    public void filterAndGrouping() throws SQLException, ClassNotFoundException {
+        Class.forName("org.apache.calcite.jdbc.Driver");
+        try(Connection conn = DriverManager.getConnection("jdbc:calcite:model=target/classes/samples/model.json", "admin", "admin")) {
+            PreparedStatement pstmt = conn.prepareStatement("select N_NATIONKEY, N_NAME, COUNT(*) from NATIONSSF WHERE N_REGIONKEY=? GROUP BY N_NATIONKEY, N_NAME");
             pstmt.setLong(1, 1L);
             ResultSet rs = pstmt.executeQuery();
             resultSetPrint(rs);

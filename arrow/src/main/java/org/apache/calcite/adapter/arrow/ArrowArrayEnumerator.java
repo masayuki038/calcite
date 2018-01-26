@@ -13,7 +13,7 @@ import java.util.Arrays;
 /**
  * Multiple Fields Enumerator
  */
-public class ArrowArrayEnumerator implements Enumerator<Object[]> {
+public class ArrowArrayEnumerator implements Enumerator<Object[]>, VectorSchemaRootContainer {
 
     private Logger logger = LoggerFactory.getLogger(ArrowArrayEnumerator.class);
 
@@ -64,4 +64,20 @@ public class ArrowArrayEnumerator implements Enumerator<Object[]> {
             }
         }).toArray();
     }
+
+    @Override
+    public int getVectorSchemaRootCount() {
+        return vectorSchemaRoots.length;
+    }
+
+    @Override
+    public int getRowCount(int index) {
+        return vectorSchemaRoots[index].getRowCount();
+    }
+
+    @Override
+    public FieldVector getFieldVector(int index, int fieldIndex) {
+        return vectorSchemaRoots[index].getFieldVectors().get(fieldIndex);
+    }
+
 }
