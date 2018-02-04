@@ -33,6 +33,7 @@ implements EnumerableRel {
         return super.computeSelfCost(planner, mq).multiplyBy(.1);
     }
 
+    @Override
     public Result implement(EnumerableRelImplementor implementor, Prefer pref) {
         final BlockBuilder builder = new BlockBuilder();
         final ArrowRel.Implementor arrowImplementor = new ArrowRel.Implementor(implementor, pref);

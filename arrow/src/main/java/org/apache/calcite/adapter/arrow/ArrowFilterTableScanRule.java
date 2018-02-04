@@ -5,6 +5,7 @@ import org.apache.calcite.adapter.enumerable.EnumerableFilter;
 import org.apache.calcite.plan.RelOptRule;
 import org.apache.calcite.plan.RelOptRuleCall;
 import org.apache.calcite.rel.RelNode;
+import org.apache.calcite.rel.logical.LogicalFilter;
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rex.RexBuilder;
 import org.apache.calcite.rex.RexProgram;
@@ -18,12 +19,12 @@ public class ArrowFilterTableScanRule extends RelOptRule {
     public static ArrowFilterTableScanRule INSTANCE = new ArrowFilterTableScanRule();
 
     public ArrowFilterTableScanRule() {
-        super(operand(EnumerableFilter.class, any()));
+        super(operand(LogicalFilter.class, operand(ArrowTableScan.class, none())));
     }
 
     @Override
     public void onMatch(RelOptRuleCall call) {
-        final EnumerableFilter filter = call.rel(0);
+        final LogicalFilter filter = call.rel(0);
         final RelNode input = filter.getInput();
 
         final RexBuilder rexBuilder = filter.getCluster().getRexBuilder();
@@ -33,7 +34,7 @@ public class ArrowFilterTableScanRule extends RelOptRule {
         programBuilder.addCondition(filter.getCondition());
         final RexProgram program = programBuilder.getProgram();
 
-        final EnumerableCalc calc = EnumerableCalc.create(input, program);
-        call.transformTo(calc);
+        final ArrowFilter arrowFilter = ArrowFilter.create(input, program);
+        call.transformTo(arrowFilter);
     }
 }
