@@ -4,6 +4,7 @@ import org.apache.calcite.adapter.enumerable.EnumerableCalc;
 import org.apache.calcite.adapter.enumerable.EnumerableFilter;
 import org.apache.calcite.plan.RelOptRule;
 import org.apache.calcite.plan.RelOptRuleCall;
+import org.apache.calcite.plan.RelTraitSet;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.logical.LogicalFilter;
 import org.apache.calcite.rel.type.RelDataType;
@@ -34,7 +35,8 @@ public class ArrowFilterTableScanRule extends RelOptRule {
         programBuilder.addCondition(filter.getCondition());
         final RexProgram program = programBuilder.getProgram();
 
-        final ArrowFilter arrowFilter = ArrowFilter.create(input, program);
+        final RelTraitSet traitSet = filter.getTraitSet().replace(ArrowRel.CONVENTION);
+        final ArrowFilter arrowFilter = ArrowFilter.create(traitSet, convert(input, ArrowRel.CONVENTION), program);
         call.transformTo(arrowFilter);
     }
 }

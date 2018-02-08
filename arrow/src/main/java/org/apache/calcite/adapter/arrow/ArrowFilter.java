@@ -7,9 +7,7 @@ import org.apache.calcite.adapter.enumerable.*;
 import org.apache.calcite.adapter.java.JavaTypeFactory;
 import org.apache.calcite.linq4j.Enumerator;
 import org.apache.calcite.linq4j.tree.*;
-import org.apache.calcite.plan.RelOptCluster;
-import org.apache.calcite.plan.RelOptPredicateList;
-import org.apache.calcite.plan.RelTraitSet;
+import org.apache.calcite.plan.*;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.core.Calc;
 import org.apache.calcite.rel.metadata.RelMetadataQuery;
@@ -44,10 +42,9 @@ public class ArrowFilter extends Calc implements ArrowRel {
         assert !program.containsAggs();
     }
 
-    public static ArrowFilter create(final RelNode input, final RexProgram program) {
+    public static ArrowFilter create(final RelTraitSet traitSet, final RelNode input, final RexProgram program) {
         final RelOptCluster cluster = input.getCluster();
         final RelMetadataQuery mq = cluster.getMetadataQuery();
-        final RelTraitSet traitSet = cluster.traitSet();
         return new ArrowFilter(cluster, traitSet, input, program);
     }
 
