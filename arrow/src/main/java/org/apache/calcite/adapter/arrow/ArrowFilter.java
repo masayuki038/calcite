@@ -1,8 +1,6 @@
 package org.apache.calcite.adapter.arrow;
 
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.Lists;
-import org.apache.calcite.DataContext;
 import org.apache.calcite.adapter.enumerable.*;
 import org.apache.calcite.adapter.java.JavaTypeFactory;
 import org.apache.calcite.linq4j.Enumerator;
@@ -11,6 +9,9 @@ import org.apache.calcite.plan.*;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.core.Calc;
 import org.apache.calcite.rel.metadata.RelMetadataQuery;
+import org.apache.calcite.rel.type.RelDataType;
+import org.apache.calcite.rel.type.RelDataTypeFactory;
+import org.apache.calcite.rel.type.RelDataTypeField;
 import org.apache.calcite.rex.RexBuilder;
 import org.apache.calcite.rex.RexProgram;
 import org.apache.calcite.rex.RexSimplify;
@@ -34,10 +35,12 @@ import java.util.List;
  */
 public class ArrowFilter extends Calc implements ArrowRel {
 
+    private int[] fields;
+
     public ArrowFilter(RelOptCluster cluster,
-                          RelTraitSet traitSet,
-                          RelNode input,
-                          RexProgram program) {
+                       RelTraitSet traitSet,
+                       RelNode input,
+                       RexProgram program) {
         super(cluster, traitSet, input, program);
         assert !program.containsAggs();
     }
@@ -92,23 +95,21 @@ public class ArrowFilter extends Calc implements ArrowRel {
         ParameterExpression container = Expressions.parameter(0, VectorSchemaRootContainer.class, "container");
         ParameterExpression i = Expressions.parameter(0, int.class, "i");
 
-        Method projectedIndexesMethod = Types.lookupMethod(ArrowFilterEnumerator.class, "getProjectedIndexes");
-
         // TODO
         BlockBuilder filterBody = new BlockBuilder();
-        ArrowRexToLixTranslator.translateCondition(
-                program,
-                typeFactory,
-                filterBody,
-                new RexToLixTranslator.InputGetterImpl(
-                        Collections.singletonList(
-                                Pair.of(input, result.physType))),
-                implementor.allCorrelateVariables);
+        filterBody.add(
+                Expressions.return_(null, Expressions.newArrayInit(int.class, 1, Expressions.constant(1))));
+//        ArrowRexToLixTranslator.translateCondition(
+//                program,
+//                typeFactory,
+//                filterBody,
+//                new RexToLixTranslator.InputGetterImpl(
+//                        Collections.singletonList(
+//                                Pair.of(input, result.physType))),
+//                implementor.allCorrelateVariables);
 
-        BlockBuilder projectedIndexesBody = new BlockBuilder();
-        GotoStatement returnIndexes = Expressions.return_(
-                        null, Expressions.new_(int[].class, Expressions.constant(0), Expressions.constant(1)));
-        projectedIndexesBody.add(returnIndexes);
+        final Expression inputEnumerable = builder.append(
+                "inputEnumerable", result.block, false);
 
         final Expression body =
                 Expressions.new_(
@@ -118,11 +119,7 @@ public class ArrowFilter extends Calc implements ArrowRel {
                                 EnumUtils.overridingMethodDecl(
                                         filterMethod,
                                         Arrays.asList(container, i),
-                                        filterBody.toBlock()),
-                                EnumUtils.overridingMethodDecl(
-                                        projectedIndexesMethod,
-                                        NO_PARAMS,
-                                        projectedIndexesBody.toBlock())
+                                        filterBody.toBlock())
                         )
                 );
 
@@ -220,6 +217,7 @@ public class ArrowFilter extends Calc implements ArrowRel {
 //                                        "current",
 //                                        NO_PARAMS,
 //                                        currentBody)));
+
         builder.add(
                 Expressions.return_(
                         null,
@@ -229,6 +227,13 @@ public class ArrowFilter extends Calc implements ArrowRel {
                                 //   Collections.singletonList(inputRowType),
                                 NO_EXPRS,
                                 ImmutableList.<MemberDeclaration>of(
+                                        Expressions.fieldDecl(
+                                                Modifier.PUBLIC
+                                                        | Modifier.FINAL,
+                                                inputEnumerator,
+                                                Expressions.call(
+                                                        inputEnumerable,
+                                                        BuiltInMethod.ENUMERABLE_ENUMERATOR.method)),
                                         Expressions.methodDecl(
                                                 Modifier.PUBLIC,
                                                 enumeratorType,
@@ -237,6 +242,4 @@ public class ArrowFilter extends Calc implements ArrowRel {
                                                 Blocks.toFunctionBlock(body))))));
         return implementor.result(physType, builder.toBlock());
     }
-
-
 }

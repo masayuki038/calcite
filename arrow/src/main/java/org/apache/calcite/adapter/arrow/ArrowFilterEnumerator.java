@@ -41,8 +41,8 @@ public abstract class ArrowFilterEnumerator implements Enumerator {
             return false;
         }
 
-        if (vectorIndex >= indexes[rootIndex].length) {
-            if (rootIndex >= indexes.length) {
+        if (vectorIndex >= (indexes[rootIndex].length - 1)) {
+            if (rootIndex >= (indexes.length - 1)) {
                 return false;
             }
             rootIndex ++;
@@ -69,6 +69,6 @@ public abstract class ArrowFilterEnumerator implements Enumerator {
         return index;
     }
 
-    abstract protected int[] filter(VectorSchemaRootContainer container, int i);
-    abstract protected int[] getProjectedIndexes();
+    abstract public int[] filter(VectorSchemaRootContainer container, int i);
+    abstract public int[] getProjectedIndexes();
 }

@@ -20,7 +20,7 @@ public class ArrowFilterTableScanRule extends RelOptRule {
     public static ArrowFilterTableScanRule INSTANCE = new ArrowFilterTableScanRule();
 
     public ArrowFilterTableScanRule() {
-        super(operand(LogicalFilter.class, operand(ArrowTableScan.class, none())));
+        super(operand(LogicalFilter.class, any()));
     }
 
     @Override
@@ -36,7 +36,10 @@ public class ArrowFilterTableScanRule extends RelOptRule {
         final RexProgram program = programBuilder.getProgram();
 
         final RelTraitSet traitSet = filter.getTraitSet().replace(ArrowRel.CONVENTION);
-        final ArrowFilter arrowFilter = ArrowFilter.create(traitSet, convert(input, ArrowRel.CONVENTION), program);
+        final ArrowFilter arrowFilter = ArrowFilter.create(
+                traitSet,
+                convert(input, ArrowRel.CONVENTION),
+                program);
         call.transformTo(arrowFilter);
     }
 }
