@@ -11,6 +11,8 @@ public interface VectorSchemaRootContainer {
 
     int getRowCount(int vectorSchemaRootIndex);
 
+    int getFieldCount(int vectorSchemaRootIndex);
+
     FieldVector getFieldVector(int vectorSchemaRootIndex, int fieldIndex);
 
 }

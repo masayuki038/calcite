@@ -1,14 +1,19 @@
 package org.apache.calcite.adapter.arrow;
 
+import com.google.common.collect.ImmutableList;
 import org.apache.calcite.adapter.enumerable.*;
-import org.apache.calcite.linq4j.tree.BlockBuilder;
-import org.apache.calcite.linq4j.tree.Expression;
+import org.apache.calcite.linq4j.tree.*;
 import org.apache.calcite.plan.*;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.convert.ConverterImpl;
 import org.apache.calcite.rel.metadata.RelMetadataQuery;
+import org.apache.calcite.util.BuiltInMethod;
 
+import java.lang.reflect.Modifier;
 import java.util.List;
+
+import static org.apache.calcite.adapter.enumerable.EnumUtils.NO_EXPRS;
+import static org.apache.calcite.adapter.enumerable.EnumUtils.NO_PARAMS;
 
 /**
  * Relational expression representing a scan of a table in a Arrow data source.
@@ -42,7 +47,27 @@ implements EnumerableRel {
                 builder.append(
                         "child",
                         result.block);
-        builder.add(childExp);
+
+        GotoStatement g = Expressions.return_(
+                null, Expressions.parameter(
+                        0, BuiltInMethod.ENUMERABLE_ENUMERATOR.getDeclaringClass(), "project"));
+
+        builder.add(
+                Expressions.return_(
+                        null,
+                        Expressions.new_(
+                                BuiltInMethod.ABSTRACT_ENUMERABLE_CTOR.constructor,
+                                // TODO: generics
+                                //   Collections.singletonList(inputRowType),
+                                NO_EXPRS,
+                                ImmutableList.<MemberDeclaration>of(
+                                        Expressions.methodDecl(
+                                                Modifier.PUBLIC,
+                                                BuiltInMethod.ENUMERABLE_ENUMERATOR.method.getReturnType(),
+                                                BuiltInMethod.ENUMERABLE_ENUMERATOR.method.getName(),
+                                                NO_PARAMS,
+                                                Blocks.toFunctionBlock(g))))));
+
 
         final PhysType physType = PhysTypeImpl.of(
                 implementor.getTypeFactory(), rowType, pref.prefer(JavaRowFormat.ARRAY));

@@ -72,11 +72,16 @@ public class ArrowFilter extends Calc implements ArrowRel {
                 Types.of(
                         ArrowFilterEnumerator.class, outputJavaType);
         Type inputJavaType = result.physType.getJavaRowType();
-        ParameterExpression inputEnumerator =
-                Expressions.parameter(
-                        Types.of(
-                                Enumerator.class, inputJavaType),
-                        "inputEnumerator");
+
+        final Expression inputEnumerable = builder.append(
+                "inputEnumerable", result.block, false);
+
+        Expression inputEnumerator =
+                Expressions.call(inputEnumerable, "enumerator", NO_PARAMS);
+//                Expressions.parameter(
+//                        Types.of(
+//                                Enumerator.class, inputJavaType),
+//                        "inputEnumerator");
         Expression input =
                 RexToLixTranslator.convert(
                         Expressions.call(
@@ -107,9 +112,6 @@ public class ArrowFilter extends Calc implements ArrowRel {
 //                        Collections.singletonList(
 //                                Pair.of(input, result.physType))),
 //                implementor.allCorrelateVariables);
-
-        final Expression inputEnumerable = builder.append(
-                "inputEnumerable", result.block, false);
 
         final Expression body =
                 Expressions.new_(
@@ -217,29 +219,7 @@ public class ArrowFilter extends Calc implements ArrowRel {
 //                                        "current",
 //                                        NO_PARAMS,
 //                                        currentBody)));
-
-        builder.add(
-                Expressions.return_(
-                        null,
-                        Expressions.new_(
-                                BuiltInMethod.ABSTRACT_ENUMERABLE_CTOR.constructor,
-                                // TODO: generics
-                                //   Collections.singletonList(inputRowType),
-                                NO_EXPRS,
-                                ImmutableList.<MemberDeclaration>of(
-                                        Expressions.fieldDecl(
-                                                Modifier.PUBLIC
-                                                        | Modifier.FINAL,
-                                                inputEnumerator,
-                                                Expressions.call(
-                                                        inputEnumerable,
-                                                        BuiltInMethod.ENUMERABLE_ENUMERATOR.method)),
-                                        Expressions.methodDecl(
-                                                Modifier.PUBLIC,
-                                                enumeratorType,
-                                                BuiltInMethod.ENUMERABLE_ENUMERATOR.method.getName(),
-                                                NO_PARAMS,
-                                                Blocks.toFunctionBlock(body))))));
+        builder.append("filter", body);
         return implementor.result(physType, builder.toBlock());
     }
 }

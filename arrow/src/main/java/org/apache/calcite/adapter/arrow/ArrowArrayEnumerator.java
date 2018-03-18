@@ -76,6 +76,11 @@ public class ArrowArrayEnumerator implements Enumerator<Object[]>, VectorSchemaR
     }
 
     @Override
+    public int getFieldCount(int index) {
+        return vectorSchemaRoots[index].getFieldVectors().size();
+    }
+
+    @Override
     public FieldVector getFieldVector(int index, int fieldIndex) {
         return vectorSchemaRoots[index].getFieldVectors().get(fieldIndex);
     }

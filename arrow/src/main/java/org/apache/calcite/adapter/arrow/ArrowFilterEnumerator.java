@@ -20,10 +20,10 @@ public abstract class ArrowFilterEnumerator implements Enumerator {
     @Override
     public Object current() {
         VectorSchemaRootContainer container = (VectorSchemaRootContainer)inputEnumerator;
-        int[] fieldIndexes = getProjectedIndexes();
-        Object[] current = new Object[fieldIndexes.length];
-        for (int i = 0; i < fieldIndexes.length; i++) {
-            FieldVector vector = container.getFieldVector(rootIndex, fieldIndexes[i]);
+        int fieldSize = container.getFieldCount(rootIndex);
+        Object[] current = new Object[fieldSize];
+        for (int i = 0; i < fieldSize; i++) {
+            FieldVector vector = container.getFieldVector(rootIndex, i);
             current[i] = vector.getAccessor().getObject(vectorIndex);
         }
         return current;
@@ -70,5 +70,4 @@ public abstract class ArrowFilterEnumerator implements Enumerator {
     }
 
     abstract public int[] filter(VectorSchemaRootContainer container, int i);
-    abstract public int[] getProjectedIndexes();
 }

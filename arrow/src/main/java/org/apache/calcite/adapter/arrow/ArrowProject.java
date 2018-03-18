@@ -68,7 +68,6 @@ public class ArrowProject extends SingleRel implements ArrowRel {
         final ArrowRel child = (ArrowRel)this.input;
         final EnumerableRel.Result result = implementor.visitChild(0, child);
         final PhysType physType = PhysTypeImpl.of(typeFactory, getRowType(), pref.prefer(result.format));
-        final Type inputJavaType = result.physType.getJavaRowType();
 
         BlockBuilder projectedIndexesBody = new BlockBuilder();
         ConstantExpression[] constants = new ConstantExpression[this.fields.length];
@@ -91,26 +90,28 @@ public class ArrowProject extends SingleRel implements ArrowRel {
                 builder.append(
                         "inputEnumerable", result.block, false);
 
-        ParameterExpression inputEnumerator =
-                Expressions.parameter(
-                        Types.of(
-                                Enumerator.class, inputJavaType),
-                        "inputEnumerator");
+//        ParameterExpression inputEnumerator =
+//                Expressions.parameter(
+//                        Types.of(
+//                                Enumerator.class, inputJavaType),
+//                        "inputEnumerator");
+//
+//        FieldDeclaration f = Expressions.fieldDecl(
+//                Modifier.PUBLIC
+//                        | Modifier.FINAL,
+//                inputEnumerator,
+//                Expressions.call(
+//                        inputEnumerable,
+//                        BuiltInMethod.ENUMERABLE_ENUMERATOR.method));
 
-        FieldDeclaration f = Expressions.fieldDecl(
-                Modifier.PUBLIC
-                        | Modifier.FINAL,
-                inputEnumerator,
-                Expressions.call(
-                        inputEnumerable,
-                        BuiltInMethod.ENUMERABLE_ENUMERATOR.method));
-
+        ParameterExpression test = new ParameterExpression(
+                0, BuiltInMethod.ENUMERABLE_ENUMERATOR.getDeclaringClass(), "filter");
         Expression arrowProjectEnumerator = Expressions.new_(
                 ArrowProjectEnumerator.class,
-                EnumUtils.NO_EXPRS,
+                Arrays.asList(test),
                 Expressions.list(m));
 
-        builder.add(arrowProjectEnumerator);
+        builder.append("project", arrowProjectEnumerator);
 
         return implementor.result(physType, builder.toBlock());
     }
