@@ -1,26 +1,20 @@
 package org.apache.calcite.adapter.arrow;
 
-import org.apache.calcite.adapter.enumerable.EnumUtils;
 import org.apache.calcite.adapter.enumerable.EnumerableRel;
 import org.apache.calcite.adapter.enumerable.PhysType;
 import org.apache.calcite.adapter.enumerable.PhysTypeImpl;
 import org.apache.calcite.adapter.java.JavaTypeFactory;
-import org.apache.calcite.linq4j.Enumerator;
 import org.apache.calcite.linq4j.tree.*;
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelTraitSet;
-import org.apache.calcite.rel.AbstractRelNode;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.SingleRel;
-import org.apache.calcite.rel.core.Calc;
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rel.type.RelDataTypeFactory;
 import org.apache.calcite.rel.type.RelDataTypeField;
-import org.apache.calcite.rex.RexProgram;
 import org.apache.calcite.util.BuiltInMethod;
 
 import java.lang.reflect.Modifier;
-import java.lang.reflect.Type;
 import java.util.Arrays;
 import java.util.List;
 
@@ -62,11 +56,11 @@ public class ArrowProject extends SingleRel implements ArrowRel {
     }
 
     @Override
-    public EnumerableRel.Result implement(Implementor implementor, EnumerableRel.Prefer pref) {
-        final JavaTypeFactory typeFactory = implementor.getTypeFactory();
+    public ArrowRel.Result implement(ArrowImplementor arrowImplementor, EnumerableRel.Prefer pref) {
+        final JavaTypeFactory typeFactory = arrowImplementor.getTypeFactory();
         final BlockBuilder builder = new BlockBuilder();
         final ArrowRel child = (ArrowRel)this.input;
-        final EnumerableRel.Result result = implementor.visitChild(0, child);
+        final ArrowRel.Result result = arrowImplementor.visitChild(0, child);
         final PhysType physType = PhysTypeImpl.of(typeFactory, getRowType(), pref.prefer(result.format));
 
         BlockBuilder projectedIndexesBody = new BlockBuilder();
@@ -105,14 +99,15 @@ public class ArrowProject extends SingleRel implements ArrowRel {
 //                        BuiltInMethod.ENUMERABLE_ENUMERATOR.method));
 
         ParameterExpression test = new ParameterExpression(
-                0, BuiltInMethod.ENUMERABLE_ENUMERATOR.getDeclaringClass(), "filter");
+                0, BuiltInMethod.ENUMERABLE_ENUMERATOR.getDeclaringClass(), result.variableName);
         Expression arrowProjectEnumerator = Expressions.new_(
                 ArrowProjectEnumerator.class,
                 Arrays.asList(test),
                 Expressions.list(m));
 
-        builder.append("project", arrowProjectEnumerator);
+        String variableName = "e" + arrowImplementor.getAndIncrementSuffix();
+        builder.append(variableName, arrowProjectEnumerator);
 
-        return implementor.result(physType, builder.toBlock());
+        return arrowImplementor.result(variableName, physType, builder.toBlock());
     }
 }

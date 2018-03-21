@@ -13,16 +13,17 @@ import java.util.Map;
  * Relational expression that uses Arrow calling convention.
  */
 public interface  ArrowRel extends RelNode {
-    EnumerableRel.Result implement(Implementor implementor, EnumerableRel.Prefer pref);
+    ArrowRel.Result implement(ArrowImplementor arrowImplementor, EnumerableRel.Prefer pref);
     Convention CONVENTION = new Convention.Impl("ARROW", ArrowRel.class);
 
 
     /** Callback for the implementation process that converts a tree of
      * {@link ArrowRel} nodes. */
-    class Implementor extends JavaRelImplementor {
+    class ArrowImplementor extends JavaRelImplementor {
 
         private EnumerableRelImplementor enumerableRelImplementor;
         private EnumerableRel.Prefer pref;
+        private int suffix = 0;
 
         // TODO corrVars is not referenced now. It will be fix when implemented Correlate for Arrow.
         private final Map<String, RexToLixTranslator.InputGetter> corrVars =
@@ -35,25 +36,47 @@ public interface  ArrowRel extends RelNode {
                     }
                 };
 
-        public Implementor(EnumerableRelImplementor enumerableRelImplementor, EnumerableRel.Prefer pref) {
+        public ArrowImplementor(EnumerableRelImplementor enumerableRelImplementor, EnumerableRel.Prefer pref) {
             super(enumerableRelImplementor.getRexBuilder());
             this.enumerableRelImplementor = enumerableRelImplementor;
             this.pref = pref;
         }
 
-        public EnumerableRel.Result visitChild(int ordinal, RelNode input) {
+        public ArrowRel.Result visitChild(int ordinal, RelNode input) {
             assert ordinal == 0;
             return ((ArrowRel) input).implement(this, pref);
         }
 
-        public EnumerableRel.Result result(PhysType physType, BlockStatement block) {
-            return this.enumerableRelImplementor.result(physType, block);
+        public ArrowRel.Result result(PhysType physType, BlockStatement block) {
+            return result(null, physType, block);
+        }
+
+        public ArrowRel.Result result(String variableName, PhysType physType, BlockStatement block) {
+            return new ArrowRel.Result(block, physType, ((PhysTypeImpl) physType).getFormat(), variableName);
         }
 
         public RexToLixTranslator.InputGetter getCorrelVariableGetter(String name) {
             assert corrVars.containsKey(name) : "Correlation variable " + name
                     + " should be defined";
             return corrVars.get(name);
+        }
+
+        public int getAndIncrementSuffix() {
+            return this.suffix++;
+        }
+    }
+
+    class Result {
+        public final BlockStatement block;
+        public final PhysType physType;
+        public final JavaRowFormat format;
+        public final String variableName;
+
+        public Result(BlockStatement block, PhysType physType, JavaRowFormat format, String variableName) {
+            this.block = block;
+            this.physType = physType;
+            this.format = format;
+            this.variableName = variableName;
         }
     }
 }

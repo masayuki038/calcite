@@ -1,34 +1,23 @@
 package org.apache.calcite.adapter.arrow;
 
-import com.google.common.collect.ImmutableList;
 import org.apache.calcite.adapter.enumerable.*;
 import org.apache.calcite.adapter.java.JavaTypeFactory;
-import org.apache.calcite.linq4j.Enumerator;
 import org.apache.calcite.linq4j.tree.*;
 import org.apache.calcite.plan.*;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.core.Calc;
 import org.apache.calcite.rel.metadata.RelMetadataQuery;
-import org.apache.calcite.rel.type.RelDataType;
-import org.apache.calcite.rel.type.RelDataTypeFactory;
-import org.apache.calcite.rel.type.RelDataTypeField;
 import org.apache.calcite.rex.RexBuilder;
 import org.apache.calcite.rex.RexProgram;
 import org.apache.calcite.rex.RexSimplify;
 import org.apache.calcite.rex.RexUtil;
 import org.apache.calcite.util.BuiltInMethod;
-import org.apache.calcite.util.Pair;
 
-import static org.apache.calcite.adapter.enumerable.EnumUtils.BRIDGE_METHODS;
-import static org.apache.calcite.adapter.enumerable.EnumUtils.NO_EXPRS;
 import static org.apache.calcite.adapter.enumerable.EnumUtils.NO_PARAMS;
 
 import java.lang.reflect.Method;
-import java.lang.reflect.Modifier;
 import java.lang.reflect.Type;
 import java.util.Arrays;
-import java.util.Collections;
-import java.util.List;
 
 /**
  * Filter for Apache Arrow
@@ -57,12 +46,12 @@ public class ArrowFilter extends Calc implements ArrowRel {
     }
 
     @Override
-    public EnumerableRel.Result implement(Implementor implementor, EnumerableRel.Prefer pref) {
-        final JavaTypeFactory typeFactory = implementor.getTypeFactory();
+    public ArrowRel.Result implement(ArrowImplementor arrowImplementor, EnumerableRel.Prefer pref) {
+        final JavaTypeFactory typeFactory = arrowImplementor.getTypeFactory();
         final BlockBuilder builder = new BlockBuilder();
         final ArrowRel child = (ArrowRel)getInput();
 
-        final EnumerableRel.Result result = implementor.visitChild(0, child);
+        final ArrowRel.Result result = arrowImplementor.visitChild(0, child);
 
         final PhysType physType = PhysTypeImpl.of(typeFactory, getRowType(), pref.prefer(result.format));
 
@@ -111,7 +100,7 @@ public class ArrowFilter extends Calc implements ArrowRel {
 //                new RexToLixTranslator.InputGetterImpl(
 //                        Collections.singletonList(
 //                                Pair.of(input, result.physType))),
-//                implementor.allCorrelateVariables);
+//                arrowImplementor.allCorrelateVariables);
 
         final Expression body =
                 Expressions.new_(
@@ -142,7 +131,7 @@ public class ArrowFilter extends Calc implements ArrowRel {
 //                            new RexToLixTranslator.InputGetterImpl(
 //                                    Collections.singletonList(
 //                                            Pair.of(input, result.physType))),
-//                            implementor.allCorrelateVariables);
+//                            arrowImplementor.allCorrelateVariables);
 //            builder2.add(
 //                    Expressions.ifThen(
 //                            condition,
@@ -171,7 +160,7 @@ public class ArrowFilter extends Calc implements ArrowRel {
 //                        new RexToLixTranslator.InputGetterImpl(
 //                                Collections.singletonList(
 //                                        Pair.of(input, result.physType))),
-//                        implementor.allCorrelateVariables);
+//                        arrowImplementor.allCorrelateVariables);
 //        builder3.add(
 //                Expressions.return_(
 //                        null, physType.record(expressions)));
@@ -219,7 +208,8 @@ public class ArrowFilter extends Calc implements ArrowRel {
 //                                        "current",
 //                                        NO_PARAMS,
 //                                        currentBody)));
-        builder.append("filter", body);
-        return implementor.result(physType, builder.toBlock());
+        String variableName = "e" + arrowImplementor.getAndIncrementSuffix();
+        builder.append(variableName, body);
+        return arrowImplementor.result(variableName, physType, builder.toBlock());
     }
 }

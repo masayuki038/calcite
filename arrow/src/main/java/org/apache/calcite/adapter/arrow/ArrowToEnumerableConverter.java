@@ -41,8 +41,8 @@ implements EnumerableRel {
     @Override
     public Result implement(EnumerableRelImplementor implementor, Prefer pref) {
         final BlockBuilder builder = new BlockBuilder();
-        final ArrowRel.Implementor arrowImplementor = new ArrowRel.Implementor(implementor, pref);
-        final Result result = arrowImplementor.visitChild(0, getInput());
+        final ArrowRel.ArrowImplementor arrowArrowImplementor = new ArrowRel.ArrowImplementor(implementor, pref);
+        final ArrowRel.Result result = arrowArrowImplementor.visitChild(0, getInput());
         Expression childExp =
                 builder.append(
                         "child",
@@ -50,7 +50,7 @@ implements EnumerableRel {
 
         GotoStatement g = Expressions.return_(
                 null, Expressions.parameter(
-                        0, BuiltInMethod.ENUMERABLE_ENUMERATOR.getDeclaringClass(), "project"));
+                        0, BuiltInMethod.ENUMERABLE_ENUMERATOR.getDeclaringClass(), result.variableName));
 
         builder.add(
                 Expressions.return_(

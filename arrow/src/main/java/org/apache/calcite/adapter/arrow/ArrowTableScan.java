@@ -64,13 +64,13 @@ public class ArrowTableScan extends TableScan implements ArrowRel {
         planner.addRule(ArrowProjectTableScanRule2.INSTANCE);
     }
 
-    public EnumerableRel.Result implement(Implementor implementor, EnumerableRel.Prefer pref) {
-        PhysType physType = PhysTypeImpl.of(implementor.getTypeFactory(), getRowType(), pref.preferArray());
-        return implementor.result(physType, Blocks.toBlock(
+    public ArrowRel.Result implement(ArrowImplementor arrowImplementor, EnumerableRel.Prefer pref) {
+        PhysType physType = PhysTypeImpl.of(arrowImplementor.getTypeFactory(), getRowType(), pref.preferArray());
+        return arrowImplementor.result(physType, Blocks.toBlock(
                 Expressions.call(
                         table.getExpression(ArrowTable.class),
                         "project",
-                        implementor.getRootExpression(),
+                        arrowImplementor.getRootExpression(),
                         Expressions.constant(this.fields))
                 )
         );
