@@ -3,6 +3,9 @@ package org.apache.calcite.adapter.arrow;
 import org.apache.arrow.vector.FieldVector;
 import org.apache.calcite.linq4j.Enumerator;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /**
  * Enumerator for Filter
  */
@@ -24,17 +27,17 @@ public abstract class ArrowFilterEnumerator implements Enumerator {
         Object[] current = new Object[fieldSize];
         for (int i = 0; i < fieldSize; i++) {
             FieldVector vector = container.getFieldVector(rootIndex, i);
-            current[i] = vector.getAccessor().getObject(vectorIndex);
+            current[i] = vector.getAccessor().getObject(indexes[rootIndex][vectorIndex]);
         }
         return current;
     }
 
     @Override
     public boolean moveNext() {
-        if (this.indexes == null) {
-            this.indexes = filter();
-            for (int rootIndex = 0; rootIndex < this.indexes.length; rootIndex++) {
-                if (this.indexes[rootIndex].length > 0) {
+        if (indexes == null) {
+            indexes = filter();
+            for (rootIndex = 0; rootIndex < indexes.length; rootIndex++) {
+                if (indexes[rootIndex].length > 0) {
                     return true;
                 }
             }
@@ -64,10 +67,26 @@ public abstract class ArrowFilterEnumerator implements Enumerator {
         int size = container.getVectorSchemaRootCount();
         int index[][] = new int[size][];
         for (int i = 0; i < size; i++) {
-            index[i] = filter(container, i);
+            index[i] = toArray(filter(container, i));
         }
         return index;
     }
 
-    abstract public int[] filter(VectorSchemaRootContainer container, int i);
+    private int[] toArray(List<Integer> list) {
+        return list.stream().mapToInt(Integer::intValue).toArray();
+    }
+
+    abstract public List<Integer> filter(VectorSchemaRootContainer container, int i);
+
+//    public List<Integer> filter(VectorSchemaRootContainer container, int i) {
+//        List<Integer> list = new ArrayList<>();
+//        for (int j = 0; j < container.getRowCount(i); j++) {
+//            FieldVector fieldVector =  container.getFieldVector(i, 2);
+//            final Long inp2_ = (Long)fieldVector.getAccessor().getObject(j);
+//            if (inp2_ != null && (Long) root.get("?0") != null && inp2_.longValue() == ((Long) root.get("?0")).longValue()) {
+//                list.add(j);
+//            }
+//        }
+//        return list;
+//    }
 }

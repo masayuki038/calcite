@@ -12,12 +12,15 @@ import org.apache.calcite.rex.RexProgram;
 import org.apache.calcite.rex.RexSimplify;
 import org.apache.calcite.rex.RexUtil;
 import org.apache.calcite.util.BuiltInMethod;
+import org.apache.calcite.util.Pair;
 
 import static org.apache.calcite.adapter.enumerable.EnumUtils.NO_PARAMS;
 
 import java.lang.reflect.Method;
 import java.lang.reflect.Type;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 
 /**
  * Filter for Apache Arrow
@@ -52,31 +55,18 @@ public class ArrowFilter extends Calc implements ArrowRel {
         final ArrowRel child = (ArrowRel)getInput();
 
         final ArrowRel.Result result = arrowImplementor.visitChild(0, child);
-
         final PhysType physType = PhysTypeImpl.of(typeFactory, getRowType(), pref.prefer(result.format));
-
         Type outputJavaType = physType.getJavaRowType();
 
         final Type enumeratorType =
                 Types.of(
                         ArrowFilterEnumerator.class, outputJavaType);
-        Type inputJavaType = result.physType.getJavaRowType();
 
         final Expression inputEnumerable = builder.append(
                 "inputEnumerable", result.block, false);
 
         Expression inputEnumerator =
                 Expressions.call(inputEnumerable, "enumerator", NO_PARAMS);
-//                Expressions.parameter(
-//                        Types.of(
-//                                Enumerator.class, inputJavaType),
-//                        "inputEnumerator");
-        Expression input =
-                RexToLixTranslator.convert(
-                        Expressions.call(
-                                inputEnumerator,
-                                BuiltInMethod.ENUMERATOR_CURRENT.method),
-                        inputJavaType);
 
         final RexBuilder rexBuilder = getCluster().getRexBuilder();
         final RelMetadataQuery mq = RelMetadataQuery.instance();
@@ -91,16 +81,28 @@ public class ArrowFilter extends Calc implements ArrowRel {
 
         // TODO
         BlockBuilder filterBody = new BlockBuilder();
-        filterBody.add(
-                Expressions.return_(null, Expressions.newArrayInit(int.class, 1, Expressions.constant(1))));
-//        ArrowRexToLixTranslator.translateCondition(
-//                program,
-//                typeFactory,
-//                filterBody,
-//                new RexToLixTranslator.InputGetterImpl(
-//                        Collections.singletonList(
-//                                Pair.of(input, result.physType))),
-//                arrowImplementor.allCorrelateVariables);
+
+        Expression list = filterBody.append("list", Expressions.new_(ArrayList.class));
+        Expression getRowCountCall = Expressions.call(container, "getRowCount", Arrays.asList(i));
+        Expression rowCount = filterBody.append("rowCount", getRowCountCall);
+        DeclarationStatement j = Expressions.declare(0, Expressions.parameter(int.class, "j"), Expressions.constant(0));
+        ParameterExpression j_ = Expressions.parameter(int.class, "j");
+        BinaryExpression test = Expressions.lessThan(j_, rowCount);
+
+        Expression where = ArrowRexToLixTranslator.translateCondition(
+                program,
+                typeFactory,
+                filterBody,
+                new ArrowRexToLixTranslator.InputGetterImpl(result.physType),
+                arrowImplementor.allCorrelateVariables);
+
+        Expression valueOf = RexToLixTranslator.convert(
+                Expressions.call(Integer.class, "valueOf", j_), Integer.class, Object.class);
+        Node listAdd = Expressions.block(Expressions.statement(Expressions.call(list, "add", valueOf)));
+        ConditionalStatement found = Expressions.ifThen(where, listAdd);
+
+        filterBody.add(Expressions.for_(j, test, Expressions.preIncrementAssign(j_), found));
+        filterBody.add(Expressions.return_(null, list));
 
         final Expression body =
                 Expressions.new_(

@@ -28,7 +28,7 @@ public class Baz2 implements Bindable {
             public Enumerator enumerator() {
                 return new ArrowFilterEnumerator(inputEnumerator) {
                     @Override
-                    public int[] filter(VectorSchemaRootContainer container, int i) {
+                    public List<Integer> filter(VectorSchemaRootContainer container, int i) {
                         FieldVector field1 = container.getFieldVector(i, 0);
                         List<Integer> selected = Collections.emptyList();
                         for (int j = 0; j < container.getRowCount(i); j++) {
@@ -37,7 +37,7 @@ public class Baz2 implements Bindable {
                                 selected.add(j);
                             }
                         }
-                        return selected.stream().mapToInt(Integer::intValue).toArray();
+                        return selected;
                     }
                 };
             }

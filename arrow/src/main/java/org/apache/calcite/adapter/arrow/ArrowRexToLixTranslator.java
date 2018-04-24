@@ -1,22 +1,38 @@
 package org.apache.calcite.adapter.arrow;
 
 import org.apache.calcite.DataContext;
+import org.apache.calcite.adapter.enumerable.EnumUtils;
+import org.apache.calcite.adapter.enumerable.PhysType;
 import org.apache.calcite.adapter.enumerable.RexImpTable;
 import org.apache.calcite.adapter.enumerable.RexToLixTranslator;
 import org.apache.calcite.adapter.java.JavaTypeFactory;
 import org.apache.calcite.linq4j.function.Function1;
 import org.apache.calcite.linq4j.tree.*;
 import org.apache.calcite.rex.*;
+import static org.apache.calcite.adapter.enumerable.EnumUtils.NO_PARAMS;
 
 import java.lang.reflect.Modifier;
 import java.lang.reflect.Type;
+import java.util.*;
 
 /**
  * .ArrowRexToLixTranslator
  */
 public class ArrowRexToLixTranslator extends RexToLixTranslator {
 
+    private RexProgram program;
+    private Expression root;
+    private RexBuilder builder;
+
     private ArrowRexToLixTranslator(RexProgram program, JavaTypeFactory typeFactory, Expression root, InputGetter inputGetter, BlockBuilder list) {
+        super(program, typeFactory, root, inputGetter, list);
+        this.program = program;
+        this.root = root;
+        this.builder = new RexBuilder(typeFactory);
+    }
+
+    public ArrowRexToLixTranslator(RexProgram program, JavaTypeFactory typeFactory, Expression root, InputGetter inputGetter, BlockBuilder list, Map<RexNode, Boolean> rexNodeBooleanMap, RexBuilder builder, ArrowRexToLixTranslator arrowRexToLixTranslator, Function1<String, InputGetter> correlates) {
+        //super(program, typeFactory, root, inputGetter, list, rexNodeBooleanMap, correlates);
         super(program, typeFactory, root, inputGetter, list);
     }
 
@@ -30,12 +46,36 @@ public class ArrowRexToLixTranslator extends RexToLixTranslator {
             return RexImpTable.TRUE_EXPR;
         }
         final ParameterExpression root = DataContext.ROOT;
-        RexToLixTranslator translator =
+        ArrowRexToLixTranslator translator =
                 new ArrowRexToLixTranslator(program, typeFactory, root, inputGetter, list);
         translator = translator.setCorrelates(correlates);
         return translator.translate(
                 program.getCondition(),
                 RexImpTable.NullAs.FALSE);
+    }
+
+    @Override
+    public ArrowRexToLixTranslator setCorrelates(
+            Function1<String, InputGetter> correlates) {
+        if (this.correlates == correlates) {
+            return this;
+        }
+        return new ArrowRexToLixTranslator(program, typeFactory, root, inputGetter, list,
+                Collections.<RexNode, Boolean>emptyMap(), builder, this, correlates);
+    }
+
+    @Override
+    public Expression translate(RexNode expr, RexImpTable.NullAs nullAs) {
+        return translate(expr, nullAs, null);
+    }
+
+    @Override
+    protected Expression translate(RexNode expr, RexImpTable.NullAs nullAs,
+                                   Type storageType) {
+        Expression expression = translate0(expr, nullAs, storageType);
+        expression = EnumUtils.enforce(storageType, expression);
+        assert expression != null;
+        return list.append("v", expression);
     }
 
     protected Expression translate0(RexNode expr, RexImpTable.NullAs nullAs,
@@ -124,4 +164,29 @@ public class ArrowRexToLixTranslator extends RexToLixTranslator {
         }
     }
 
+    public static class InputGetterImpl implements InputGetter {
+        private PhysType physType;
+
+        public InputGetterImpl(PhysType physType) {
+            this.physType = physType;
+        }
+
+        public Expression field(BlockBuilder list, int index, Type storageType) {
+            List<Expression> paramList = new ArrayList<>();
+            paramList.add(Expressions.parameter(int.class, "i"));
+            paramList.add(Expressions.constant(index));
+
+            Expression container =  Expressions.parameter(VectorSchemaRootContainer.class, "container");
+            Expression call1 = Expressions.call(container, "getFieldVector", paramList);
+            final Expression fieldVector = list.append("fieldVector", call1);
+
+            Expression call2 = Expressions.call(fieldVector, "getAccessor", NO_PARAMS);
+            final Expression accessor = list.append("accessor", call2);
+
+            Expression call3 = Expressions.call(accessor, "getObject", Arrays.asList(Expressions.parameter(int.class, "j")));
+            final Expression value = list.append("value", call3);
+            Type fieldType = physType.fieldClass(index);
+            return RexToLixTranslator.convert(value, value.getType(), fieldType);
+        }
+    }
 }
