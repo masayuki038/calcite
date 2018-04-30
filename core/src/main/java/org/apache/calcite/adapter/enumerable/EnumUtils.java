@@ -60,10 +60,10 @@ public class EnumUtils {
 
   static final boolean BRIDGE_METHODS = true;
 
-  static final List<ParameterExpression> NO_PARAMS =
+  public static final List<ParameterExpression> NO_PARAMS =
       ImmutableList.of();
 
-  static final List<Expression> NO_EXPRS =
+  public static final List<Expression> NO_EXPRS =
       ImmutableList.of();
 
   public static final List<String> LEFT_RIGHT =
@@ -236,7 +236,7 @@ public class EnumUtils {
     return Lists.transform(operandList, REX_TO_INTERNAL_TYPE);
   }
 
-  static Expression enforce(final Type storageType,
+  public static Expression enforce(final Type storageType,
       final Expression e) {
     if (storageType != null && e.type != storageType) {
       if (e.type == java.sql.Date.class) {

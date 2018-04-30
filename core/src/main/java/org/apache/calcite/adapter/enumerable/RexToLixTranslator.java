@@ -87,15 +87,15 @@ public class RexToLixTranslator {
           findMethod(SqlFunctions.class, "translate3", String.class, String.class,
               String.class), TRANSLATE3);
 
-  final JavaTypeFactory typeFactory;
+  protected final JavaTypeFactory typeFactory;
   final RexBuilder builder;
   private final RexProgram program;
   private final Expression root;
-  private final RexToLixTranslator.InputGetter inputGetter;
-  private final BlockBuilder list;
+  protected final RexToLixTranslator.InputGetter inputGetter;
+  protected final BlockBuilder list;
   private final Map<? extends RexNode, Boolean> exprNullableMap;
   private final RexToLixTranslator parent;
-  private final Function1<String, InputGetter> correlates;
+  protected final Function1<String, InputGetter> correlates;
 
   private static Method findMethod(
       Class<?> clazz, String name, Class... parameterTypes) {
@@ -106,7 +106,7 @@ public class RexToLixTranslator {
     }
   }
 
-  private RexToLixTranslator(RexProgram program, JavaTypeFactory typeFactory,
+  protected RexToLixTranslator(RexProgram program, JavaTypeFactory typeFactory,
       Expression root, InputGetter inputGetter, BlockBuilder list) {
     this(program, typeFactory, root, inputGetter, list,
         Collections.<RexNode, Boolean>emptyMap(),
@@ -206,7 +206,7 @@ public class RexToLixTranslator {
     return translate(expr, nullAs);
   }
 
-  Expression translate(RexNode expr, RexImpTable.NullAs nullAs) {
+  public Expression translate(RexNode expr, RexImpTable.NullAs nullAs) {
     return translate(expr, nullAs, null);
   }
 
@@ -216,7 +216,7 @@ public class RexToLixTranslator {
     return translate(expr, nullAs, storageType);
   }
 
-  Expression translate(RexNode expr, RexImpTable.NullAs nullAs,
+  protected Expression translate(RexNode expr, RexImpTable.NullAs nullAs,
       Type storageType) {
     Expression expression = translate0(expr, nullAs, storageType);
     expression = EnumUtils.enforce(storageType, expression);
@@ -704,7 +704,7 @@ public class RexToLixTranslator {
   }
 
   /** Translates a call to an operator or function. */
-  private Expression translateCall(RexCall call, RexImpTable.NullAs nullAs) {
+  protected Expression translateCall(RexCall call, RexImpTable.NullAs nullAs) {
     final SqlOperator operator = call.getOperator();
     CallImplementor implementor =
         RexImpTable.INSTANCE.get(operator);
@@ -715,7 +715,7 @@ public class RexToLixTranslator {
   }
 
   /** Translates a parameter. */
-  private Expression translateParameter(RexDynamicParam expr,
+  protected Expression translateParameter(RexDynamicParam expr,
       RexImpTable.NullAs nullAs, Type storageType) {
     if (storageType == null) {
       storageType = typeFactory.getJavaClass(expr.getType());
