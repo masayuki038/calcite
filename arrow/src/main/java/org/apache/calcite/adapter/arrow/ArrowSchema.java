@@ -1,8 +1,5 @@
 package org.apache.calcite.adapter.arrow;
 
-import com.google.common.base.Function;
-import org.apache.calcite.rel.RelNode;
-import org.apache.calcite.runtime.Hook;
 import org.apache.calcite.schema.Table;
 import org.apache.calcite.schema.impl.AbstractSchema;
 
@@ -12,8 +9,6 @@ import org.apache.arrow.vector.VectorSchemaRoot;
 import org.apache.arrow.vector.file.ArrowFileReader;
 import org.apache.arrow.vector.file.SeekableReadChannel;
 import org.apache.arrow.vector.util.ByteArrayReadableSeekableByteChannel;
-import org.apache.calcite.tools.Program;
-import org.apache.calcite.util.Holder;
 
 import java.io.File;
 import java.io.IOException;

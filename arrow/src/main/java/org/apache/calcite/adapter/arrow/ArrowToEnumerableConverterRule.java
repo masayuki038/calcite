@@ -2,7 +2,6 @@ package org.apache.calcite.adapter.arrow;
 
 import com.google.common.base.Predicates;
 import org.apache.calcite.adapter.enumerable.EnumerableConvention;
-import org.apache.calcite.interpreter.BindableConvention;
 import org.apache.calcite.plan.RelTraitSet;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.convert.ConverterRule;

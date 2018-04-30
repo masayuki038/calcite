@@ -11,8 +11,6 @@ import org.apache.calcite.rex.RexBuilder;
 import org.apache.calcite.rex.RexProgram;
 import org.apache.calcite.rex.RexSimplify;
 import org.apache.calcite.rex.RexUtil;
-import org.apache.calcite.util.BuiltInMethod;
-import org.apache.calcite.util.Pair;
 
 import static org.apache.calcite.adapter.enumerable.EnumUtils.NO_PARAMS;
 
@@ -20,7 +18,6 @@ import java.lang.reflect.Method;
 import java.lang.reflect.Type;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
 
 /**
  * Filter for Apache Arrow

@@ -3,7 +3,6 @@ package org.apache.calcite.adapter.arrow;
 import org.apache.arrow.vector.FieldVector;
 import org.apache.calcite.linq4j.Enumerator;
 
-import java.util.ArrayList;
 import java.util.List;
 
 /**
