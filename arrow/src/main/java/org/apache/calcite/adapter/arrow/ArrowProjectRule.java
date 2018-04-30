@@ -18,11 +18,11 @@ import java.util.List;
 /**
  * Project scan rule for Apache Arrow
  */
-public class ArrowProjectTableScanRule2 extends RelOptRule {
+public class ArrowProjectRule extends RelOptRule {
 
-    public static ArrowProjectTableScanRule2 INSTANCE = new ArrowProjectTableScanRule2(RelFactories.LOGICAL_BUILDER);
+    public static ArrowProjectRule INSTANCE = new ArrowProjectRule(RelFactories.LOGICAL_BUILDER);
 
-    public ArrowProjectTableScanRule2(RelBuilderFactory relBuilderFactory) {
+    public ArrowProjectRule(RelBuilderFactory relBuilderFactory) {
         //super(operand(EnumerableProject.class, operand(ArrowToEnumerableConverter.class, operand(ArrowFilter.class, operand(ArrowTableScan.class, none())))), relBuilderFactory, null);
         //super(operand(EnumerableProject.class, operand(ArrowToEnumerableConverter.class, operand(ArrowFilter.class, any()))));
         //super(operand(LogicalProject.class, operand(LogicalFilter.class, none())));
