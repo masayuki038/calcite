@@ -8,11 +8,13 @@ import org.apache.calcite.linq4j.tree.*;
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelTraitSet;
 import org.apache.calcite.rel.RelNode;
-import org.apache.calcite.rel.SingleRel;
+import org.apache.calcite.rel.core.Project;
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rel.type.RelDataTypeFactory;
 import org.apache.calcite.rel.type.RelDataTypeField;
+import org.apache.calcite.rex.RexNode;
 import org.apache.calcite.util.BuiltInMethod;
+import org.apache.calcite.util.Pair;
 
 import java.lang.reflect.Modifier;
 import java.util.Arrays;
@@ -23,36 +25,23 @@ import static org.apache.calcite.adapter.enumerable.EnumUtils.NO_PARAMS;
 /**
  * Projection for Apache Arrow
  */
-public class ArrowProject extends SingleRel implements ArrowRel {
+public class ArrowProject extends Project implements ArrowRel {
 
-    private int[] fields;
-    private  List<RelDataTypeField> fieldList;
+    private List<String> inputFieldNames;
 
     public ArrowProject(RelOptCluster cluster,
                         RelTraitSet traitSet,
                         RelNode input,
-                        List<RelDataTypeField> fieldList,
-                        int[] fields) {
-        super(cluster, traitSet, input);
-        this.fieldList = fieldList;
-        this.fields = fields;
-    }
-
-    public static ArrowProject create(final RelTraitSet traitSet, final List<RelDataTypeField> fieldList, final RelNode input, int[] fields) {
-        final RelOptCluster cluster = input.getCluster();
-        return new ArrowProject(cluster, traitSet, input, fieldList, fields);
+                        List<? extends RexNode> projects, RelDataType rowType) {
+        super(cluster, traitSet, input, projects, rowType);
+        this.inputFieldNames = input.getRowType().getFieldNames();
     }
 
     @Override
-    public RelNode copy(RelTraitSet traitSet, List<RelNode> inputs) {
-        return new ArrowProject(getCluster(), traitSet, sole(inputs), this.fieldList, this.fields);
-    }
-
-    @Override
-    public RelDataType deriveRowType() {
-        RelDataTypeFactory.FieldInfoBuilder builder = getCluster().getTypeFactory().builder();
-        Arrays.stream(this.fields).forEach(i -> builder.add(this.fieldList.get(i)));
-        return builder.build();
+    public ArrowProject copy(RelTraitSet traitSet, RelNode input,
+                                      List<RexNode> projects, RelDataType rowType) {
+        return new ArrowProject(getCluster(), traitSet, input, projects,
+                rowType);
     }
 
     @Override
@@ -63,10 +52,18 @@ public class ArrowProject extends SingleRel implements ArrowRel {
         final ArrowRel.Result result = arrowImplementor.visitChild(0, child);
         final PhysType physType = PhysTypeImpl.of(typeFactory, getRowType(), pref.prefer(result.format));
 
+        List<String> fieldNames = getRowType().getFieldNames();
         BlockBuilder projectedIndexesBody = new BlockBuilder();
-        ConstantExpression[] constants = new ConstantExpression[this.fields.length];
-        for(int i = 0; i < this.fields.length; i ++) {
-            constants[i] = Expressions.constant(this.fields[i]);
+
+        ConstantExpression[] constants = new ConstantExpression[fieldNames.size()];
+        for(int i = 0; i < fieldNames.size(); i ++) {
+            String fieldName = fieldNames.get(i);
+            for(int j = 0; j < this.inputFieldNames.size(); j++) {
+                if (fieldName.equals(this.inputFieldNames.get(j))) {
+                    constants[i] = Expressions.constant(j);
+                    break;
+                }
+            }
         }
 
         GotoStatement returnIndexes = Expressions.return_(
@@ -83,20 +80,6 @@ public class ArrowProject extends SingleRel implements ArrowRel {
         final Expression inputEnumerable =
                 builder.append(
                         "inputEnumerable", result.block, false);
-
-//        ParameterExpression inputEnumerator =
-//                Expressions.parameter(
-//                        Types.of(
-//                                Enumerator.class, inputJavaType),
-//                        "inputEnumerator");
-//
-//        FieldDeclaration f = Expressions.fieldDecl(
-//                Modifier.PUBLIC
-//                        | Modifier.FINAL,
-//                inputEnumerator,
-//                Expressions.call(
-//                        inputEnumerable,
-//                        BuiltInMethod.ENUMERABLE_ENUMERATOR.method));
 
         ParameterExpression test = new ParameterExpression(
                 0, BuiltInMethod.ENUMERABLE_ENUMERATOR.getDeclaringClass(), result.variableName);

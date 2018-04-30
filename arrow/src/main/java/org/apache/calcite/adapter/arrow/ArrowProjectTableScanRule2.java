@@ -45,18 +45,13 @@ public class ArrowProjectTableScanRule2 extends RelOptRule {
             return;
         }
         final RelTraitSet traitSet = project.getTraitSet().replace(ArrowRel.CONVENTION);
-        ArrowProject newArrowProject = ArrowProject.create(
+        ArrowProject newArrowProject = new ArrowProject(
+                project.getCluster(),
                 traitSet,
-                project.getRowType().getFieldList(),
                 convert(project.getInput(), ArrowRel.CONVENTION),
-                fields
-        );
+                project.getProjects(),
+                project.getRowType());
         call.transformTo(newArrowProject);
-//        ArrowFilter newArrowFilter = ArrowFilter.create(
-//                arrowFilter.getTraitSet(),
-//                project.getInput(),
-//                programBuilder.getProgram());
-        //call.transformTo(newArrowFilter);
     }
 
     private int[] getProjectFields(List<RexNode> exps) {
