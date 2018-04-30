@@ -15,9 +15,9 @@ public class JdbcTest {
     public void filter() throws SQLException, ClassNotFoundException {
         Class.forName("org.apache.calcite.jdbc.Driver");
         try(Connection conn = DriverManager.getConnection("jdbc:calcite:model=target/classes/samples/model.json", "admin", "admin")) {
-            PreparedStatement pstmt = conn.prepareStatement("select N_REGIONKEY, N_NATIONKEY, N_NAME from NATIONSSF WHERE N_REGIONKEY=?");
-            //PreparedStatement pstmt = conn.prepareStatement("select N_NATIONKEY, N_NAME, N_REGIONKEY from NATIONSSF");
-            pstmt.setLong(1, 1L);
+            //PreparedStatement pstmt = conn.prepareStatement("select N_REGIONKEY, N_NATIONKEY, N_NAME from NATIONSSF WHERE N_REGIONKEY=?");
+            PreparedStatement pstmt = conn.prepareStatement("select N_NATIONKEY, N_NAME, N_REGIONKEY from NATIONSSF");
+            //pstmt.setLong(1, 1L);
             ResultSet rs = pstmt.executeQuery();
             resultSetPrint(rs);
         }

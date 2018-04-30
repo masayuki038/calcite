@@ -1,9 +1,7 @@
 package org.apache.calcite.adapter.arrow;
 
 import org.apache.calcite.adapter.enumerable.*;
-import org.apache.calcite.linq4j.tree.Blocks;
-import org.apache.calcite.linq4j.tree.Expressions;
-import org.apache.calcite.linq4j.tree.Primitive;
+import org.apache.calcite.linq4j.tree.*;
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelOptPlanner;
 import org.apache.calcite.plan.RelOptTable;
@@ -14,6 +12,8 @@ import org.apache.calcite.rel.core.TableScan;
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rel.type.RelDataTypeFactory;
 import org.apache.calcite.rel.type.RelDataTypeField;
+
+import static org.apache.calcite.adapter.enumerable.EnumUtils.NO_PARAMS;
 
 import java.util.Arrays;
 import java.util.List;
@@ -66,13 +66,14 @@ public class ArrowTableScan extends TableScan implements ArrowRel {
 
     public ArrowRel.Result implement(ArrowImplementor arrowImplementor, EnumerableRel.Prefer pref) {
         PhysType physType = PhysTypeImpl.of(arrowImplementor.getTypeFactory(), getRowType(), pref.preferArray());
-        return arrowImplementor.result(physType, Blocks.toBlock(
-                Expressions.call(
-                        table.getExpression(ArrowTable.class),
-                        "project",
-                        arrowImplementor.getRootExpression(),
-                        Expressions.constant(this.fields))
-                )
-        );
+        String param = "_e" + arrowImplementor.getAndIncrementSuffix();
+        BlockBuilder builder = new BlockBuilder();
+        Expression call = Expressions.call(
+            table.getExpression(ArrowTable.class),
+            "project",
+            arrowImplementor.getRootExpression(),
+                Expressions.constant(this.fields));
+        builder.append(param, Expressions.call(call, "enumerator", NO_PARAMS));
+        return arrowImplementor.result(param, physType, builder.toBlock());
     }
 }

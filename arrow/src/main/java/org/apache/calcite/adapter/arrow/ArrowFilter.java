@@ -59,11 +59,8 @@ public class ArrowFilter extends Calc implements ArrowRel {
                 Types.of(
                         ArrowFilterEnumerator.class, outputJavaType);
 
-        final Expression inputEnumerable = builder.append(
-                "inputEnumerable", result.block, false);
-
-        Expression inputEnumerator =
-                Expressions.call(inputEnumerable, "enumerator", NO_PARAMS);
+        final Expression inputEnumerator = builder.append(
+                "inputEnumerator", result.block, false);
 
         final RexBuilder rexBuilder = getCluster().getRexBuilder();
         final RelMetadataQuery mq = RelMetadataQuery.instance();
