@@ -5,6 +5,7 @@ import org.apache.calcite.schema.impl.AbstractSchema;
 
 import org.apache.arrow.memory.RootAllocator;
 import org.apache.arrow.memory.BufferAllocator;
+import org.apache.arrow.vector.UInt4Vector;
 import org.apache.arrow.vector.VectorSchemaRoot;
 import org.apache.arrow.vector.file.ArrowFileReader;
 import org.apache.arrow.vector.file.SeekableReadChannel;
@@ -30,12 +31,6 @@ public class ArrowSchema extends AbstractSchema {
 
     public ArrowSchema(File directory) {
         this.directory = directory;
-//        Hook.PROGRAM.add(new Function<Holder<Program>, Void>() {
-//            public Void apply(Holder<Program> holder) {
-//                holder.set(ArrowPrograms.standard());
-//                return null;
-//            }
-//        });
     }
 
     private String trim(String s, String suffix) {
@@ -61,7 +56,10 @@ public class ArrowSchema extends AbstractSchema {
             Arrays.stream(arrowFiles).forEach(file -> {
                 try {
                     VectorSchemaRoot[] vectorSchemaRoots = load(file.getAbsolutePath(), allocator);
-                    tableMap.put(trim(file.getName(), ".arrow").toUpperCase(), new ArrowTable(vectorSchemaRoots, null));
+                    UInt4Vector selectionVector = new UInt4Vector("selectionVector", allocator);
+                    tableMap.put(
+                            trim(file.getName(), ".arrow").toUpperCase(),
+                            new ArrowTable(vectorSchemaRoots, selectionVector, null));
                 } catch (IOException e) {
                     throw new IllegalStateException(e);
                 }

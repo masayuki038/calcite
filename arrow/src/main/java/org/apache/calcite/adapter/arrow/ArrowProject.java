@@ -67,7 +67,7 @@ public class ArrowProject extends Project implements ArrowRel {
                 null, Expressions.newArrayInit(int.class, 1, constants));
         projectedIndexesBody.add(returnIndexes);
 
-        MethodDeclaration m = Expressions.methodDecl(
+        MethodDeclaration getProjectedIndexes = Expressions.methodDecl(
                 Modifier.PUBLIC,
                 int[].class,
                 "getProjectedIndexes",
@@ -78,12 +78,11 @@ public class ArrowProject extends Project implements ArrowRel {
                 builder.append(
                         "inputEnumerable", result.block, false);
 
-        ParameterExpression test = new ParameterExpression(
-                0, BuiltInMethod.ENUMERABLE_ENUMERATOR.getDeclaringClass(), result.variableName);
+        ParameterExpression previous = new ParameterExpression(0, ArrowProcessor.class, result.variableName);
         Expression arrowProjectEnumerator = Expressions.new_(
-                ArrowProjectEnumerator.class,
-                Arrays.asList(test),
-                Expressions.list(m));
+                ArrowProjectProcessor.class,
+                Arrays.asList(Expressions.call(previous, "run", NO_PARAMS)),
+                Expressions.list(getProjectedIndexes));
 
         String variableName = "e" + arrowImplementor.getAndIncrementSuffix();
         builder.append(variableName, arrowProjectEnumerator);

@@ -1,5 +1,7 @@
 package org.apache.calcite.adapter.arrow;
 
+import org.apache.arrow.vector.UInt4Vector;
+import org.apache.arrow.vector.types.pojo.Schema;
 import org.apache.calcite.adapter.java.JavaTypeFactory;
 import org.apache.calcite.linq4j.Enumerator;
 
@@ -24,17 +26,15 @@ public class ArrowEnumerator implements Enumerator<Object>, VectorSchemaRootCont
 
     private VectorSchemaRoot[] vectorSchemaRoots;
     private int[] fields;
+    private UInt4Vector selectionVector;
 
     private int index = 0;
     private int currentPos = 0;
 
-    public ArrowEnumerator(VectorSchemaRoot[] vectorSchemaRoots, int[] fields) {
+    public ArrowEnumerator(VectorSchemaRoot[] vectorSchemaRoots, UInt4Vector selectionVector, int[] fields) {
         this.vectorSchemaRoots = vectorSchemaRoots;
+        this.selectionVector = selectionVector;
         this.fields = fields;
-    }
-
-    public ArrowEnumerator(VectorSchemaRoot[] vectorSchemaRoots) {
-        this(vectorSchemaRoots, EnumerableUtils.identityList(vectorSchemaRoots[0].getFieldVectors().size()));
     }
 
     public static RelDataType deduceRowType(VectorSchemaRoot vectorSchemaRoot, JavaTypeFactory typeFactory) {
@@ -100,5 +100,10 @@ public class ArrowEnumerator implements Enumerator<Object>, VectorSchemaRootCont
 
     public FieldVector getFieldVector(int index, int fieldIndex) {
         return vectorSchemaRoots[index].getFieldVectors().get(fieldIndex);
+    }
+
+    @Override
+    public UInt4Vector selectionVector() {
+        return selectionVector;
     }
 }

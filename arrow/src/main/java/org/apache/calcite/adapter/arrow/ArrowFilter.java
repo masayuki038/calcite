@@ -11,6 +11,7 @@ import org.apache.calcite.rex.RexBuilder;
 import org.apache.calcite.rex.RexProgram;
 import org.apache.calcite.rex.RexSimplify;
 import org.apache.calcite.rex.RexUtil;
+import static org.apache.calcite.adapter.enumerable.EnumUtils.NO_PARAMS;
 
 import java.lang.reflect.Method;
 import java.lang.reflect.Type;
@@ -53,9 +54,9 @@ public class ArrowFilter extends Calc implements ArrowRel {
         final PhysType physType = PhysTypeImpl.of(typeFactory, getRowType(), pref.prefer(result.format));
         Type outputJavaType = physType.getJavaRowType();
 
-        final Type enumeratorType =
+        final Type arrowFilterProcessor =
                 Types.of(
-                        ArrowFilterEnumerator.class, outputJavaType);
+                        ArrowFilterProcessor.class, outputJavaType);
 
         final Expression inputEnumerator = builder.append(
                 "inputEnumerator", result.block, false);
@@ -67,19 +68,30 @@ public class ArrowFilter extends Calc implements ArrowRel {
                 new RexSimplify(rexBuilder, predicates, false, RexUtil.EXECUTOR);
         final RexProgram program = this.program.normalize(rexBuilder, simplify);
 
-        Method filterMethod = Types.lookupMethod(ArrowFilterEnumerator.class, "filter", VectorSchemaRootContainer.class, int.class);
-        ParameterExpression container = Expressions.parameter(0, VectorSchemaRootContainer.class, "container");
-        ParameterExpression i = Expressions.parameter(0, int.class, "i");
+        Method runMethod = Types.lookupMethod(ArrowFilterProcessor.class, "run");
+        ParameterExpression input = Expressions.parameter(0, VectorSchemaRootContainer.class, "input");
 
-        // TODO
         BlockBuilder filterBody = new BlockBuilder();
 
-        Expression list = filterBody.append("list", Expressions.new_(ArrayList.class));
-        Expression getRowCountCall = Expressions.call(container, "getRowCount", Arrays.asList(i));
+        ParameterExpression index = Expressions.parameter(int.class, "index");
+        filterBody.add(Expressions.declare(0, index, Expressions.constant(0)));
+        Expression selectionVector = filterBody.append(
+                "selectionVector", Expressions.call(input, "selectionVector", NO_PARAMS));
+        filterBody.add(Expressions.statement(Expressions.call(selectionVector, "clear", NO_PARAMS)));
+        filterBody.add(Expressions.statement(Expressions.call(selectionVector, "allocateNew", NO_PARAMS)));
+
+        Expression mutator = filterBody.append(
+                "mutator", Expressions.call(selectionVector, "getMutator", NO_PARAMS));
+        Expression getVectorSchemaRootCount = Expressions.call(input, "getVectorSchemaRootCount", NO_PARAMS);
+        ParameterExpression i = Expressions.parameter(int.class, "i");
+        DeclarationStatement declareI = Expressions.declare(0, i, Expressions.constant(0));
+        BinaryExpression iLessThan = Expressions.lessThan(i, getVectorSchemaRootCount);
+
+        Expression getRowCountCall = Expressions.call(input, "getRowCount", Arrays.asList(i));
         Expression rowCount = filterBody.append("rowCount", getRowCountCall);
-        DeclarationStatement j = Expressions.declare(0, Expressions.parameter(int.class, "j"), Expressions.constant(0));
-        ParameterExpression j_ = Expressions.parameter(int.class, "j");
-        BinaryExpression test = Expressions.lessThan(j_, rowCount);
+        ParameterExpression j = Expressions.parameter(int.class, "j");
+        DeclarationStatement declareJ = Expressions.declare(0, j, Expressions.constant(0));
+        BinaryExpression jLessThan = Expressions.lessThan(j, rowCount);
 
         Expression where = ArrowRexToLixTranslator.translateCondition(
                 program,
@@ -88,25 +100,29 @@ public class ArrowFilter extends Calc implements ArrowRel {
                 new ArrowRexToLixTranslator.InputGetterImpl(result.physType),
                 arrowImplementor.allCorrelateVariables);
 
-        Expression valueOf = RexToLixTranslator.convert(
-                Expressions.call(Integer.class, "valueOf", j_), Integer.class, Object.class);
-        Node listAdd = Expressions.block(Expressions.statement(Expressions.call(list, "add", valueOf)));
-        ConditionalStatement found = Expressions.ifThen(where, listAdd);
+        Expression upper = Expressions.leftShift(i, Expressions.constant(16));
+        Expression lower = Expressions.and(j, Expressions.constant(65535));
+        Expression value = Expressions.or(upper, lower);
 
-        filterBody.add(Expressions.for_(j, test, Expressions.preIncrementAssign(j_), found));
-        filterBody.add(Expressions.return_(null, list));
+        Node selectionVectorSet = Expressions.block(
+                Expressions.statement(
+                        Expressions.call(mutator, "set", Expressions.postIncrementAssign(index), value)));
+        ConditionalStatement found = Expressions.ifThen(where, selectionVectorSet);
+
+        Statement jFor = Expressions.for_(declareJ, jLessThan, Expressions.preIncrementAssign(j), found);
+        filterBody.add(Expressions.for_(declareI, iLessThan, Expressions.preIncrementAssign(i), jFor));
+        filterBody.add(Expressions.statement(Expressions.call(mutator, "setValueCount", index)));
+        filterBody.add(Expressions.return_(null, input));
 
         final Expression body =
                 Expressions.new_(
-                        enumeratorType,
-                        Arrays.asList(inputEnumerator),
+                        arrowFilterProcessor,
+                        Arrays.asList(Expressions.call(inputEnumerator, "run", NO_PARAMS)),
                         Expressions.list(
                                 EnumUtils.overridingMethodDecl(
-                                        filterMethod,
-                                        Arrays.asList(container, i),
-                                        filterBody.toBlock())
-                        )
-                );
+                                        runMethod,
+                                        NO_PARAMS,
+                                        filterBody.toBlock())));
 
         String variableName = "e" + arrowImplementor.getAndIncrementSuffix();
         builder.append(variableName, body);

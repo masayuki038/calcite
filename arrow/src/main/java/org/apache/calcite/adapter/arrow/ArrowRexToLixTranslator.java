@@ -176,7 +176,7 @@ public class ArrowRexToLixTranslator extends RexToLixTranslator {
             paramList.add(Expressions.parameter(int.class, "i"));
             paramList.add(Expressions.constant(index));
 
-            Expression container =  Expressions.parameter(VectorSchemaRootContainer.class, "container");
+            Expression container =  Expressions.parameter(VectorSchemaRootContainer.class, "input");
             Expression call1 = Expressions.call(container, "getFieldVector", paramList);
             final Expression fieldVector = list.append("fieldVector", call1);
 

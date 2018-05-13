@@ -49,8 +49,9 @@ implements EnumerableRel {
                         result.block);
 
         GotoStatement g = Expressions.return_(
-                null, Expressions.parameter(
-                        0, BuiltInMethod.ENUMERABLE_ENUMERATOR.getDeclaringClass(), result.variableName));
+                null, Expressions.new_(
+                        ArrowToEnumerableEnumerator.class,
+                        Expressions.list(Expressions.call(childExp, "run", NO_PARAMS))));
 
         builder.add(
                 Expressions.return_(
@@ -67,7 +68,6 @@ implements EnumerableRel {
                                                 BuiltInMethod.ENUMERABLE_ENUMERATOR.method.getName(),
                                                 NO_PARAMS,
                                                 Blocks.toFunctionBlock(g))))));
-
 
         final PhysType physType = PhysTypeImpl.of(
                 implementor.getTypeFactory(), rowType, pref.prefer(JavaRowFormat.ARRAY));

@@ -9,6 +9,7 @@ import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rel.type.RelDataTypeFactory;
 
+import org.apache.arrow.vector.UInt4Vector;
 import org.apache.arrow.vector.VectorSchemaRoot;
 import org.apache.calcite.rel.type.RelProtoDataType;
 import org.apache.calcite.schema.QueryableTable;
@@ -25,10 +26,12 @@ import java.lang.reflect.Type;
 public class ArrowTable extends AbstractTable implements QueryableTable, TranslatableTable {
 
     private VectorSchemaRoot[] vectorSchemaRoots;
+    private UInt4Vector selectionVector;
     private RelProtoDataType tProtoRowType;
 
-    public ArrowTable(VectorSchemaRoot[] vectorSchemaRoots, RelProtoDataType tProtoRowType) {
+    public ArrowTable(VectorSchemaRoot[] vectorSchemaRoots, UInt4Vector selectionVector, RelProtoDataType tProtoRowType) {
         this.vectorSchemaRoots = vectorSchemaRoots;
+        this.selectionVector = selectionVector;
         this.tProtoRowType = tProtoRowType;
     }
 
@@ -39,11 +42,11 @@ public class ArrowTable extends AbstractTable implements QueryableTable, Transla
         return ArrowEnumerator.deduceRowType(this.vectorSchemaRoots[0], (JavaTypeFactory)typeFactory);
     }
 
-    public Enumerable<Object> project(DataContext root, final int[] fields) {
-        return new AbstractEnumerable<Object>() {
+    public ArrowProcessor project(DataContext root, final int[] fields) {
+        return new ArrowProjectProcessor(new VectorSchemaRootContainerImpl(vectorSchemaRoots, selectionVector)) {
             @Override
-            public Enumerator<Object> enumerator() {
-                return new ArrowEnumerator(vectorSchemaRoots, fields);
+            public int[] getProjectedIndexes() {
+                return fields;
             }
         };
     }

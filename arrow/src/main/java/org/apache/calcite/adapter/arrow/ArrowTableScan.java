@@ -73,7 +73,7 @@ public class ArrowTableScan extends TableScan implements ArrowRel {
             "project",
             arrowImplementor.getRootExpression(),
                 Expressions.constant(this.fields));
-        builder.append(param, Expressions.call(call, "enumerator", NO_PARAMS));
+        builder.append(param, call);
         return arrowImplementor.result(param, physType, builder.toBlock());
     }
 }
