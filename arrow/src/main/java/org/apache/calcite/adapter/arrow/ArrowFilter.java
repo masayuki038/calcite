@@ -15,15 +15,12 @@ import static org.apache.calcite.adapter.enumerable.EnumUtils.NO_PARAMS;
 
 import java.lang.reflect.Method;
 import java.lang.reflect.Type;
-import java.util.ArrayList;
 import java.util.Arrays;
 
 /**
  * Filter for Apache Arrow
  */
 public class ArrowFilter extends Calc implements ArrowRel {
-
-    private int[] fields;
 
     public ArrowFilter(RelOptCluster cluster,
                        RelTraitSet traitSet,

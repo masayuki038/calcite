@@ -1,10 +1,8 @@
 package org.apache.calcite.adapter.arrow;
 
 import org.apache.arrow.vector.VectorSchemaRoot;
-import org.apache.arrow.vector.types.pojo.Schema;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.arrow.vector.FieldVector;
-import org.apache.arrow.vector.UInt4Vector;
 
 import java.util.ArrayList;
 import java.util.List;

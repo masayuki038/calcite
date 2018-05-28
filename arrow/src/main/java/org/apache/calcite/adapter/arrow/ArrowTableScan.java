@@ -13,8 +13,6 @@ import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rel.type.RelDataTypeFactory;
 import org.apache.calcite.rel.type.RelDataTypeField;
 
-import static org.apache.calcite.adapter.enumerable.EnumUtils.NO_PARAMS;
-
 import java.util.Arrays;
 import java.util.List;
 

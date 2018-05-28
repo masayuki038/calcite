@@ -23,9 +23,6 @@ public class ArrowProjectRule extends RelOptRule {
     public static ArrowProjectRule INSTANCE = new ArrowProjectRule(RelFactories.LOGICAL_BUILDER);
 
     public ArrowProjectRule(RelBuilderFactory relBuilderFactory) {
-        //super(operand(EnumerableProject.class, operand(ArrowToEnumerableConverter.class, operand(ArrowFilter.class, operand(ArrowTableScan.class, none())))), relBuilderFactory, null);
-        //super(operand(EnumerableProject.class, operand(ArrowToEnumerableConverter.class, operand(ArrowFilter.class, any()))));
-        //super(operand(LogicalProject.class, operand(LogicalFilter.class, none())));
         super(operand(LogicalProject.class, operand(LogicalFilter.class, none())));
     }
 

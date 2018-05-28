@@ -32,7 +32,6 @@ public class ArrowRexToLixTranslator extends RexToLixTranslator {
     }
 
     public ArrowRexToLixTranslator(RexProgram program, JavaTypeFactory typeFactory, Expression root, InputGetter inputGetter, BlockBuilder list, Map<RexNode, Boolean> rexNodeBooleanMap, RexBuilder builder, ArrowRexToLixTranslator arrowRexToLixTranslator, Function1<String, InputGetter> correlates) {
-        //super(program, typeFactory, root, inputGetter, list, rexNodeBooleanMap, correlates);
         super(program, typeFactory, root, inputGetter, list);
     }
 

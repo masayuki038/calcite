@@ -47,10 +47,6 @@ public interface  ArrowRel extends RelNode {
             return ((ArrowRel) input).implement(this, pref);
         }
 
-        public ArrowRel.Result result(PhysType physType, BlockStatement block) {
-            return result(null, physType, block);
-        }
-
         public ArrowRel.Result result(String variableName, PhysType physType, BlockStatement block) {
             return new ArrowRel.Result(block, physType, ((PhysTypeImpl) physType).getFormat(), variableName);
         }
