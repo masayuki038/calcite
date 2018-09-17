@@ -20,9 +20,10 @@ import org.apache.calcite.runtime.CalciteContextException;
 import org.apache.calcite.sql.SqlIdentifier;
 import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.parser.SqlParserPos;
-import org.apache.calcite.sql.test.DefaultSqlTestFactory;
+import org.apache.calcite.sql.test.SqlTestFactory;
 import org.apache.calcite.sql.test.SqlTesterImpl;
 
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
 
 import org.junit.Test;
@@ -124,7 +125,7 @@ public class SqlValidatorUtilTest {
     newList.add(new SqlIdentifier(Arrays.asList("f0", "c0"), SqlParserPos.ZERO));
     newList.add(new SqlIdentifier(Arrays.asList("f0", "c0"), SqlParserPos.ZERO));
     final SqlTesterImpl tester =
-        new SqlTesterImpl(DefaultSqlTestFactory.INSTANCE);
+        new SqlTesterImpl(SqlTestFactory.INSTANCE);
     final SqlValidatorImpl validator =
         (SqlValidatorImpl) tester.getValidator();
     try {
@@ -137,6 +138,20 @@ public class SqlValidatorUtilTest {
     // should not throw
     newList.set(1, new SqlIdentifier(Arrays.asList("f0", "c1"), SqlParserPos.ZERO));
     SqlValidatorUtil.checkIdentifierListForDuplicates(newList, null);
+  }
+
+  @Test public void testNameMatcher() {
+    final ImmutableList<String> beatles =
+        ImmutableList.of("john", "paul", "ringo", "rinGo");
+    final SqlNameMatcher insensitiveMatcher =
+        SqlNameMatchers.withCaseSensitive(false);
+    assertThat(insensitiveMatcher.frequency(beatles, "ringo"), is(2));
+    assertThat(insensitiveMatcher.frequency(beatles, "rinGo"), is(2));
+    final SqlNameMatcher sensitiveMatcher =
+        SqlNameMatchers.withCaseSensitive(true);
+    assertThat(sensitiveMatcher.frequency(beatles, "ringo"), is(1));
+    assertThat(sensitiveMatcher.frequency(beatles, "rinGo"), is(1));
+    assertThat(sensitiveMatcher.frequency(beatles, "Ringo"), is(0));
   }
 }
 

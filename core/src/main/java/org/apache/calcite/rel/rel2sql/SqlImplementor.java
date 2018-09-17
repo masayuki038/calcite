@@ -72,7 +72,6 @@ import org.apache.calcite.util.TimeString;
 import org.apache.calcite.util.TimestampString;
 import org.apache.calcite.util.Util;
 
-import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
@@ -80,8 +79,10 @@ import com.google.common.collect.Iterables;
 
 import java.math.BigDecimal;
 import java.util.AbstractList;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -90,6 +91,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 /**
@@ -106,7 +108,7 @@ public abstract class SqlImplementor {
   protected final Map<CorrelationId, Context> correlTableMap = new HashMap<>();
 
   protected SqlImplementor(SqlDialect dialect) {
-    this.dialect = Preconditions.checkNotNull(dialect);
+    this.dialect = Objects.requireNonNull(dialect);
   }
 
   public abstract Result visitChild(int i, RelNode e);
@@ -122,7 +124,11 @@ public abstract class SqlImplementor {
     selectList.add(node);
   }
 
-  public static boolean isStar(List<RexNode> exps, RelDataType inputRowType) {
+  /** Returns whether a list of expressions projects all fields, in order,
+   * from the input, with the same names. */
+  public static boolean isStar(List<RexNode> exps, RelDataType inputRowType,
+      RelDataType projectRowType) {
+    assert exps.size() == projectRowType.getFieldCount();
     int i = 0;
     for (RexNode ref : exps) {
       if (!(ref instanceof RexInputRef)) {
@@ -131,7 +137,8 @@ public abstract class SqlImplementor {
         return false;
       }
     }
-    return i == inputRowType.getFieldCount();
+    return i == inputRowType.getFieldCount()
+        && inputRowType.getFieldNames().equals(projectRowType.getFieldNames());
   }
 
   public static boolean isStar(RexProgram program) {
@@ -436,11 +443,32 @@ public abstract class SqlImplementor {
         return field(((RexInputRef) rex).getIndex());
 
       case FIELD_ACCESS:
-        RexFieldAccess access = (RexFieldAccess) rex;
-        final RexCorrelVariable variable =
-            (RexCorrelVariable) access.getReferenceExpr();
-        final Context aliasContext = correlTableMap.get(variable.id);
-        return aliasContext.field(access.getField().getIndex());
+        final Deque<RexFieldAccess> accesses = new ArrayDeque<>();
+        RexNode referencedExpr = rex;
+        while (referencedExpr.getKind() == SqlKind.FIELD_ACCESS) {
+          accesses.offerLast((RexFieldAccess) referencedExpr);
+          referencedExpr = ((RexFieldAccess) referencedExpr).getReferenceExpr();
+        }
+        SqlIdentifier sqlIdentifier;
+        switch (referencedExpr.getKind()) {
+        case CORREL_VARIABLE:
+          final RexCorrelVariable variable = (RexCorrelVariable) referencedExpr;
+          final Context correlAliasContext = correlTableMap.get(variable.id);
+          final RexFieldAccess lastAccess = accesses.pollLast();
+          assert lastAccess != null;
+          sqlIdentifier = (SqlIdentifier) correlAliasContext
+              .field(lastAccess.getField().getIndex());
+          break;
+        default:
+          sqlIdentifier = (SqlIdentifier) toSql(program, referencedExpr);
+        }
+
+        int nameIndex = sqlIdentifier.names.size();
+        RexFieldAccess access;
+        while ((access = accesses.pollLast()) != null) {
+          sqlIdentifier = sqlIdentifier.add(nameIndex++, access.getField().getName(), POS);
+        }
+        return sqlIdentifier;
 
       case PATTERN_INPUT_REF:
         final RexPatternFieldRef ref = (RexPatternFieldRef) rex;
@@ -725,7 +753,7 @@ public abstract class SqlImplementor {
       }
       return op.createCall(
           aggCall.isDistinct() ? SqlSelectKeyword.DISTINCT.symbol(POS) : null,
-          POS, operands.toArray(new SqlNode[operands.size()]));
+          POS, operands.toArray(new SqlNode[0]));
     }
 
     /** Converts a collation to an ORDER BY item. */
@@ -940,9 +968,9 @@ public abstract class SqlImplementor {
         if (needNew
                 && neededAlias != null
                 && (aliases.size() != 1 || !aliases.containsKey(neededAlias))) {
-          newContext =
-              aliasContext(ImmutableMap.of(neededAlias, rel.getRowType()),
-                  qualified);
+          final Map<String, RelDataType> newAliases =
+              ImmutableMap.of(neededAlias, rel.getInput(0).getRowType());
+          newContext = aliasContext(newAliases, qualified);
         } else {
           newContext = aliasContext(aliases, qualified);
         }
@@ -1062,7 +1090,7 @@ public abstract class SqlImplementor {
         return this;
       } else {
         return new Result(node, clauses, neededAlias, neededType,
-            ImmutableMap.<String, RelDataType>of(neededAlias, neededType));
+            ImmutableMap.of(neededAlias, neededType));
       }
     }
   }

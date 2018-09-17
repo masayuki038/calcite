@@ -810,14 +810,11 @@ public enum SqlKind {
   /** The {@code GROUP_ID()} function. */
   GROUP_ID,
 
-  /**
-   * the internal permute function in match_recognize cluse
-   */
+  /** The internal "permute" function in a MATCH_RECOGNIZE clause. */
   PATTERN_PERMUTE,
 
-  /**
-   * the special patterns to exclude enclosing pattern from output in match_recognize clause
-   */
+  /** The special patterns to exclude enclosing pattern from output in a
+   * MATCH_RECOGNIZE clause. */
   PATTERN_EXCLUDED,
 
   // Aggregate functions
@@ -849,11 +846,17 @@ public enum SqlKind {
   /** The {@code LAST_VALUE} aggregate function. */
   LAST_VALUE,
 
+  /** The {@code ANY_VALUE} aggregate function. */
+  ANY_VALUE,
+
   /** The {@code COVAR_POP} aggregate function. */
   COVAR_POP,
 
   /** The {@code COVAR_SAMP} aggregate function. */
   COVAR_SAMP,
+
+  /** The {@code REGR_COUNT} aggregate function. */
+  REGR_COUNT,
 
   /** The {@code REGR_SXX} aggregate function. */
   REGR_SXX,
@@ -878,6 +881,9 @@ public enum SqlKind {
 
   /** The {@code NTILE} aggregate function. */
   NTILE,
+
+  /** The {@code NTH_VALUE} aggregate function. */
+  NTH_VALUE,
 
   /** The {@code COLLECT} aggregate function. */
   COLLECT,
@@ -938,6 +944,24 @@ public enum SqlKind {
    * the {@link #SESSION} group function. */
   SESSION_END,
 
+  /** Column declaration. */
+  COLUMN_DECL,
+
+  /** Attribute definition. */
+  ATTRIBUTE_DEF,
+
+  /** {@code CHECK} constraint. */
+  CHECK,
+
+  /** {@code UNIQUE} constraint. */
+  UNIQUE,
+
+  /** {@code PRIMARY KEY} constraint. */
+  PRIMARY_KEY,
+
+  /** {@code FOREIGN KEY} constraint. */
+  FOREIGN_KEY,
+
   // DDL and session control statements follow. The list is not exhaustive: feel
   // free to add more.
 
@@ -949,6 +973,15 @@ public enum SqlKind {
 
   /** {@code ALTER SESSION} DDL statement. */
   ALTER_SESSION,
+
+  /** {@code CREATE SCHEMA} DDL statement. */
+  CREATE_SCHEMA,
+
+  /** {@code CREATE FOREIGN SCHEMA} DDL statement. */
+  CREATE_FOREIGN_SCHEMA,
+
+  /** {@code DROP SCHEMA} DDL statement. */
+  DROP_SCHEMA,
 
   /** {@code CREATE TABLE} DDL statement. */
   CREATE_TABLE,
@@ -968,6 +1001,15 @@ public enum SqlKind {
   /** {@code DROP VIEW} DDL statement. */
   DROP_VIEW,
 
+  /** {@code CREATE MATERIALIZED VIEW} DDL statement. */
+  CREATE_MATERIALIZED_VIEW,
+
+  /** {@code ALTER MATERIALIZED VIEW} DDL statement. */
+  ALTER_MATERIALIZED_VIEW,
+
+  /** {@code DROP MATERIALIZED VIEW} DDL statement. */
+  DROP_MATERIALIZED_VIEW,
+
   /** {@code CREATE SEQUENCE} DDL statement. */
   CREATE_SEQUENCE,
 
@@ -985,6 +1027,12 @@ public enum SqlKind {
 
   /** {@code DROP INDEX} DDL statement. */
   DROP_INDEX,
+
+  /** {@code CREATE TYPE} DDL statement. */
+  CREATE_TYPE,
+
+  /** {@code DROP TYPE} DDL statement. */
+  DROP_TYPE,
 
   /** DDL statement not handled above.
    *
@@ -1016,7 +1064,7 @@ public enum SqlKind {
    */
   public static final EnumSet<SqlKind> AGGREGATE =
       EnumSet.of(COUNT, SUM, SUM0, MIN, MAX, LEAD, LAG, FIRST_VALUE,
-          LAST_VALUE, COVAR_POP, COVAR_SAMP, REGR_SXX, REGR_SYY,
+          LAST_VALUE, COVAR_POP, COVAR_SAMP, REGR_COUNT, REGR_SXX, REGR_SYY,
           AVG, STDDEV_POP, STDDEV_SAMP, VAR_POP, VAR_SAMP, NTILE, COLLECT,
           FUSION, SINGLE_VALUE, ROW_NUMBER, RANK, PERCENT_RANK, DENSE_RANK,
           CUME_DIST);
@@ -1045,10 +1093,14 @@ public enum SqlKind {
    */
   public static final EnumSet<SqlKind> DDL =
       EnumSet.of(COMMIT, ROLLBACK, ALTER_SESSION,
+          CREATE_SCHEMA, CREATE_FOREIGN_SCHEMA, DROP_SCHEMA,
           CREATE_TABLE, ALTER_TABLE, DROP_TABLE,
           CREATE_VIEW, ALTER_VIEW, DROP_VIEW,
+          CREATE_MATERIALIZED_VIEW, ALTER_MATERIALIZED_VIEW,
+          DROP_MATERIALIZED_VIEW,
           CREATE_SEQUENCE, ALTER_SEQUENCE, DROP_SEQUENCE,
           CREATE_INDEX, ALTER_INDEX, DROP_INDEX,
+          CREATE_TYPE, DROP_TYPE,
           SET_OPTION, OTHER_DDL);
 
   /**
@@ -1126,6 +1178,15 @@ public enum SqlKind {
    */
   public static final Set<SqlKind> AVG_AGG_FUNCTIONS =
       EnumSet.of(AVG, STDDEV_POP, STDDEV_SAMP, VAR_POP, VAR_SAMP);
+
+  /**
+   * Category of SqlCovarAggFunction.
+   *
+   * <p>Consists of {@link #COVAR_POP}, {@link #COVAR_SAMP}, {@link #REGR_SXX},
+   * {@link #REGR_SYY}.
+   */
+  public static final Set<SqlKind> COVAR_AVG_AGG_FUNCTIONS =
+      EnumSet.of(COVAR_POP, COVAR_SAMP, REGR_COUNT, REGR_SXX, REGR_SYY);
 
   /**
    * Category of comparison operators.
@@ -1250,6 +1311,11 @@ public enum SqlKind {
       return IS_NOT_FALSE;
     case IS_NOT_FALSE:
       return IS_NOT_TRUE;
+     // (NOT x) IS NULL => x IS NULL
+     // Similarly (NOT x) IS NOT NULL => x IS NOT NULL
+    case IS_NOT_NULL:
+    case IS_NULL:
+      return this;
     default:
       return this.negate();
     }

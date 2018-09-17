@@ -20,7 +20,7 @@ limitations under the License.
   <parent>
     <groupId>org.apache.calcite</groupId>
     <artifactId>calcite</artifactId>
-    <version>1.15.0-SNAPSHOT</version>
+    <version>1.18.0-SNAPSHOT</version>
   </parent>
 
   <properties>
@@ -135,6 +135,15 @@ limitations under the License.
                 <ignoredUnusedDeclaredDependency>org.openjdk.jmh:jmh-generator-annprocess</ignoredUnusedDeclaredDependency>
               </ignoredUnusedDeclaredDependencies>
             </configuration>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
+        <groupId>org.owasp</groupId>
+        <artifactId>dependency-check-maven</artifactId>
+        <executions>
+          <execution>
+            <phase>none</phase>
           </execution>
         </executions>
       </plugin>

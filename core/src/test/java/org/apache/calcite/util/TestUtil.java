@@ -16,8 +16,12 @@
  */
 package org.apache.calcite.util;
 
+import com.google.common.annotations.VisibleForTesting;
+
 import org.junit.ComparisonFailure;
 
+import java.util.Objects;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
@@ -33,6 +37,9 @@ public abstract class TestUtil {
 
   private static final String LINE_BREAK =
       "\\\\n\"" + Util.LINE_SEPARATOR + " + \"";
+
+  private static final String JAVA_VERSION =
+      System.getProperties().getProperty("java.version");
 
   //~ Methods ----------------------------------------------------------------
 
@@ -190,6 +197,40 @@ public abstract class TestUtil {
         .replaceAll("\\[", "\\\\[")
         .replaceAll("\\]", "\\\\]");
   }
+
+  /**
+   * Returns the Java major version: 7 for JDK 1.7, 8 for JDK 8, 10 for
+   * JDK 10, etc. depending on current system property {@code java.version}.
+   */
+  public static int getJavaMajorVersion() {
+    return majorVersionFromString(JAVA_VERSION);
+  }
+
+  /**
+   * Detects java major version given long format of full JDK version.
+   * See <a href="http://openjdk.java.net/jeps/223">JEP 223: New Version-String Scheme</a>.
+   *
+   * @param version current version as string usually from {@code java.version} property.
+   * @return major java version ({@code 8, 9, 10, 11} etc.)
+   */
+  @VisibleForTesting
+  static int majorVersionFromString(String version) {
+    Objects.requireNonNull(version, "version");
+
+    if (version.startsWith("1.")) {
+      // running on version <= 8 (expecting string of type: x.y.z*)
+      final String[] versions = version.split("\\.");
+      return Integer.parseInt(versions[1]);
+    }
+    // probably running on > 8 (just get first integer which is major version)
+    Matcher matcher = Pattern.compile("^\\d+").matcher(version);
+    if (!matcher.lookingAt()) {
+      throw new IllegalArgumentException("Can't parse (detect) JDK version from " + version);
+    }
+
+    return Integer.parseInt(matcher.group());
+  }
+
 }
 
 // End TestUtil.java

@@ -21,7 +21,6 @@ import org.apache.calcite.linq4j.tree.Types;
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelOptPlanner;
 import org.apache.calcite.plan.RelOptPredicateList;
-import org.apache.calcite.plan.RelOptSchema;
 import org.apache.calcite.plan.RelOptTable;
 import org.apache.calcite.rel.InvalidRelException;
 import org.apache.calcite.rel.RelCollation;
@@ -35,7 +34,6 @@ import org.apache.calcite.rel.RelRoot;
 import org.apache.calcite.rel.core.Aggregate;
 import org.apache.calcite.rel.core.AggregateCall;
 import org.apache.calcite.rel.core.Correlate;
-import org.apache.calcite.rel.core.CorrelationId;
 import org.apache.calcite.rel.core.Filter;
 import org.apache.calcite.rel.core.Join;
 import org.apache.calcite.rel.core.JoinRelType;
@@ -55,6 +53,7 @@ import org.apache.calcite.rel.logical.LogicalSort;
 import org.apache.calcite.rel.logical.LogicalTableScan;
 import org.apache.calcite.rel.logical.LogicalUnion;
 import org.apache.calcite.rel.logical.LogicalValues;
+import org.apache.calcite.rel.metadata.BuiltInMetadata;
 import org.apache.calcite.rel.metadata.CachingRelMetadataProvider;
 import org.apache.calcite.rel.metadata.ChainedRelMetadataProvider;
 import org.apache.calcite.rel.metadata.DefaultRelMetadataProvider;
@@ -65,6 +64,7 @@ import org.apache.calcite.rel.metadata.MetadataHandler;
 import org.apache.calcite.rel.metadata.ReflectiveRelMetadataProvider;
 import org.apache.calcite.rel.metadata.RelColumnOrigin;
 import org.apache.calcite.rel.metadata.RelMdCollation;
+import org.apache.calcite.rel.metadata.RelMdColumnUniqueness;
 import org.apache.calcite.rel.metadata.RelMdUtil;
 import org.apache.calcite.rel.metadata.RelMetadataProvider;
 import org.apache.calcite.rel.metadata.RelMetadataQuery;
@@ -76,7 +76,6 @@ import org.apache.calcite.rex.RexLiteral;
 import org.apache.calcite.rex.RexNode;
 import org.apache.calcite.rex.RexTableInputRef;
 import org.apache.calcite.rex.RexTableInputRef.RelTableRef;
-import org.apache.calcite.schema.SchemaPlus;
 import org.apache.calcite.sql.SqlKind;
 import org.apache.calcite.sql.SqlOperator;
 import org.apache.calcite.sql.SqlSpecialOperator;
@@ -86,23 +85,26 @@ import org.apache.calcite.sql.type.SqlTypeName;
 import org.apache.calcite.tools.FrameworkConfig;
 import org.apache.calcite.tools.Frameworks;
 import org.apache.calcite.tools.RelBuilder;
+import org.apache.calcite.util.BuiltInMethod;
 import org.apache.calcite.util.ImmutableBitSet;
 import org.apache.calcite.util.ImmutableIntList;
+import org.apache.calcite.util.SaffronProperties;
 
-import com.google.common.base.Function;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
-import com.google.common.collect.Lists;
 import com.google.common.collect.Multimap;
 import com.google.common.collect.Sets;
 
 import org.hamcrest.CoreMatchers;
 import org.hamcrest.CustomTypeSafeMatcher;
 import org.hamcrest.Matcher;
+import org.hamcrest.core.Is;
+import org.junit.Assume;
 import org.junit.Ignore;
 import org.junit.Test;
 
+import java.io.File;
 import java.lang.reflect.Method;
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -116,6 +118,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
+import java.util.concurrent.locks.ReentrantLock;
+
+import static org.apache.calcite.test.Matchers.within;
 
 import static org.hamcrest.CoreMatchers.endsWith;
 import static org.hamcrest.CoreMatchers.equalTo;
@@ -161,11 +166,11 @@ public class RelMetadataTest extends SqlToRelTestBase {
 
   private static final List<String> EMP_QNAME = ImmutableList.of("CATALOG", "SALES", "EMP");
 
-  //~ Methods ----------------------------------------------------------------
+  /** Ensures that tests that use a lot of memory do not run at the same
+   * time. */
+  private static final ReentrantLock LOCK = new ReentrantLock();
 
-  private static Matcher<? super Number> nearTo(Number v, Number epsilon) {
-    return equalTo(v); // TODO: use epsilon
-  }
+  //~ Methods ----------------------------------------------------------------
 
   // ----------------------------------------------------------------------
   // Tests for getPercentageOriginalRows
@@ -777,7 +782,33 @@ public class RelMetadataTest extends SqlToRelTestBase {
     final RelMetadataQuery mq = RelMetadataQuery.instance();
     Double result = mq.getSelectivity(rel, null);
     assertThat(result,
-        nearTo(DEFAULT_COMP_SELECTIVITY * DEFAULT_EQUAL_SELECTIVITY, EPSILON));
+        within(DEFAULT_COMP_SELECTIVITY * DEFAULT_EQUAL_SELECTIVITY, EPSILON));
+  }
+
+  /** Test case for
+   * <a href="https://issues.apache.org/jira/browse/CALCITE-1808">[CALCITE-1808]
+   * JaninoRelMetadataProvider loading cache might cause
+   * OutOfMemoryError</a>. */
+  @Test public void testMetadataHandlerCacheLimit() {
+    Assume.assumeTrue("too slow to run every day, and it does not reproduce the issue",
+        CalciteAssert.ENABLE_SLOW);
+    Assume.assumeTrue("If cache size is too large, this test may fail and the "
+            + "test won't be to blame",
+        SaffronProperties.INSTANCE.metadataHandlerCacheMaximumSize().get()
+            < 10_000);
+    final int iterationCount = 2_000;
+    final RelNode rel = convertSql("select * from emp");
+    final RelMetadataProvider metadataProvider =
+        rel.getCluster().getMetadataProvider();
+    final RelOptPlanner planner = rel.getCluster().getPlanner();
+    for (int i = 0; i < iterationCount; i++) {
+      RelMetadataQuery.THREAD_PROVIDERS.set(
+          JaninoRelMetadataProvider.of(
+              new CachingRelMetadataProvider(metadataProvider, planner)));
+      final RelMetadataQuery mq = RelMetadataQuery.instance();
+      final Double result = mq.getRowCount(rel);
+      assertThat(result, within(14d, 0.1d));
+    }
   }
 
   @Test public void testDistinctRowCountTable() {
@@ -865,7 +896,7 @@ public class RelMetadataTest extends SqlToRelTestBase {
     final RelMetadataQuery mq = RelMetadataQuery.instance();
     Set<ImmutableBitSet> result = mq.getUniqueKeys(rel);
     assertThat(result,
-        CoreMatchers.<Set<ImmutableBitSet>>equalTo(
+        CoreMatchers.equalTo(
             ImmutableSet.of(ImmutableBitSet.of())));
     assertUniqueConsistent(rel);
   }
@@ -875,7 +906,7 @@ public class RelMetadataTest extends SqlToRelTestBase {
     final RelMetadataQuery mq = RelMetadataQuery.instance();
     final Set<ImmutableBitSet> result = mq.getUniqueKeys(rel);
     assertThat(result,
-        CoreMatchers.<Set<ImmutableBitSet>>equalTo(
+        CoreMatchers.equalTo(
             ImmutableSet.of(ImmutableBitSet.of())));
     assertUniqueConsistent(rel);
   }
@@ -886,7 +917,7 @@ public class RelMetadataTest extends SqlToRelTestBase {
     final RelMetadataQuery mq = RelMetadataQuery.instance();
     final Set<ImmutableBitSet> result = mq.getUniqueKeys(rel);
     assertThat(result,
-        CoreMatchers.<Set<ImmutableBitSet>>equalTo(
+        CoreMatchers.equalTo(
             ImmutableSet.of(ImmutableBitSet.of(0))));
     assertUniqueConsistent(rel);
   }
@@ -898,28 +929,25 @@ public class RelMetadataTest extends SqlToRelTestBase {
     final RelMetadataQuery mq = RelMetadataQuery.instance();
     final Set<ImmutableBitSet> result = mq.getUniqueKeys(rel);
     assertThat(result,
-        CoreMatchers.<Set<ImmutableBitSet>>equalTo(
+        CoreMatchers.equalTo(
             ImmutableSet.of(ImmutableBitSet.of(0))));
     assertUniqueConsistent(rel);
   }
 
   @Test public void testBrokenCustomProvider() {
-    final List<String> buf = Lists.newArrayList();
+    final List<String> buf = new ArrayList<>();
     ColTypeImpl.THREAD_LIST.set(buf);
 
     final String sql = "select deptno, count(*) from emp where deptno > 10 "
         + "group by deptno having count(*) = 0";
     final RelRoot root = tester
-        .withClusterFactory(
-            new Function<RelOptCluster, RelOptCluster>() {
-              public RelOptCluster apply(RelOptCluster cluster) {
-                cluster.setMetadataProvider(
-                    ChainedRelMetadataProvider.of(
-                        ImmutableList.of(BrokenColTypeImpl.SOURCE,
-                            cluster.getMetadataProvider())));
-                return cluster;
-              }
-            })
+        .withClusterFactory(cluster -> {
+          cluster.setMetadataProvider(
+              ChainedRelMetadataProvider.of(
+                  ImmutableList.of(BrokenColTypeImpl.SOURCE,
+                      cluster.getMetadataProvider())));
+          return cluster;
+        })
         .convertSqlToRel(sql);
 
     final RelNode rel = root.rel;
@@ -947,25 +975,22 @@ public class RelMetadataTest extends SqlToRelTestBase {
   }
 
   @Test public void testCustomProvider() {
-    final List<String> buf = Lists.newArrayList();
+    final List<String> buf = new ArrayList<>();
     ColTypeImpl.THREAD_LIST.set(buf);
 
     final String sql = "select deptno, count(*) from emp where deptno > 10 "
         + "group by deptno having count(*) = 0";
     final RelRoot root = tester
-        .withClusterFactory(
-            new Function<RelOptCluster, RelOptCluster>() {
-              public RelOptCluster apply(RelOptCluster cluster) {
-                // Create a custom provider that includes ColType.
-                // Include the same provider twice just to be devious.
-                final ImmutableList<RelMetadataProvider> list =
-                    ImmutableList.of(ColTypeImpl.SOURCE, ColTypeImpl.SOURCE,
-                        cluster.getMetadataProvider());
-                cluster.setMetadataProvider(
-                    ChainedRelMetadataProvider.of(list));
-                return cluster;
-              }
-            })
+        .withClusterFactory(cluster -> {
+          // Create a custom provider that includes ColType.
+          // Include the same provider twice just to be devious.
+          final ImmutableList<RelMetadataProvider> list =
+              ImmutableList.of(ColTypeImpl.SOURCE, ColTypeImpl.SOURCE,
+                  cluster.getMetadataProvider());
+          cluster.setMetadataProvider(
+              ChainedRelMetadataProvider.of(list));
+          return cluster;
+        })
         .convertSqlToRel(sql);
     final RelNode rel = root.rel;
 
@@ -1022,15 +1047,10 @@ public class RelMetadataTest extends SqlToRelTestBase {
     final Join join = (Join) rel.getInput();
     final RelOptTable empTable = join.getInput(0).getTable();
     final RelOptTable deptTable = join.getInput(1).getTable();
-    Frameworks.withPlanner(
-        new Frameworks.PlannerAction<Void>() {
-          public Void apply(RelOptCluster cluster,
-              RelOptSchema relOptSchema,
-              SchemaPlus rootSchema) {
-            checkCollation(cluster, empTable, deptTable);
-            return null;
-          }
-        });
+    Frameworks.withPlanner((cluster, relOptSchema, rootSchema) -> {
+      checkCollation(cluster, empTable, deptTable);
+      return null;
+    });
   }
 
   private void checkCollation(RelOptCluster cluster, RelOptTable empTable,
@@ -1096,7 +1116,7 @@ public class RelMetadataTest extends SqlToRelTestBase {
 
     // Values (empty)
     collations = RelMdCollation.values(mq, empTable.getRowType(),
-        ImmutableList.<ImmutableList<RexLiteral>>of());
+        ImmutableList.of());
     assertThat(collations.toString(),
         equalTo("[[0, 1, 2, 3, 4, 5, 6, 7, 8], "
             + "[1, 2, 3, 4, 5, 6, 7, 8], "
@@ -1137,6 +1157,56 @@ public class RelMetadataTest extends SqlToRelTestBase {
     assertThat(mq.collations(values), equalTo(collations));
   }
 
+  /** Unit test for
+   * {@link org.apache.calcite.rel.metadata.RelMdColumnUniqueness#areColumnsUnique}
+   * applied to {@link Values}. */
+  @Test public void testColumnUniquenessForValues() {
+    Frameworks.withPlanner((cluster, relOptSchema, rootSchema) -> {
+      final RexBuilder rexBuilder = cluster.getRexBuilder();
+      final RelMetadataQuery mq = RelMetadataQuery.instance();
+      final RelDataType rowType = cluster.getTypeFactory().builder()
+          .add("a", SqlTypeName.INTEGER)
+          .add("b", SqlTypeName.VARCHAR)
+          .build();
+      final ImmutableList.Builder<ImmutableList<RexLiteral>> tuples =
+          ImmutableList.builder();
+      addRow(tuples, rexBuilder, 1, "X");
+      addRow(tuples, rexBuilder, 2, "Y");
+      addRow(tuples, rexBuilder, 3, "X");
+      addRow(tuples, rexBuilder, 4, "X");
+
+      final LogicalValues values =
+          LogicalValues.create(cluster, rowType, tuples.build());
+
+      final ImmutableBitSet colNone = ImmutableBitSet.of();
+      final ImmutableBitSet col0 = ImmutableBitSet.of(0);
+      final ImmutableBitSet col1 = ImmutableBitSet.of(1);
+      final ImmutableBitSet colAll = ImmutableBitSet.of(0, 1);
+
+      assertThat(mq.areColumnsUnique(values, col0), is(true));
+      assertThat(mq.areColumnsUnique(values, col1), is(false));
+      assertThat(mq.areColumnsUnique(values, colAll), is(true));
+      assertThat(mq.areColumnsUnique(values, colNone), is(false));
+
+      // Repeat the above tests directly against the handler.
+      final RelMdColumnUniqueness handler =
+          (RelMdColumnUniqueness) RelMdColumnUniqueness.SOURCE
+              .handlers(BuiltInMetadata.ColumnUniqueness.DEF)
+              .get(BuiltInMethod.COLUMN_UNIQUENESS.method)
+              .iterator().next();
+      assertThat(handler.areColumnsUnique(values, mq, col0, false),
+          is(true));
+      assertThat(handler.areColumnsUnique(values, mq, col1, false),
+          is(false));
+      assertThat(handler.areColumnsUnique(values, mq, colAll, false),
+          is(true));
+      assertThat(handler.areColumnsUnique(values, mq, colNone, false),
+          is(false));
+
+      return null;
+    });
+  }
+
   private void addRow(ImmutableList.Builder<ImmutableList<RexLiteral>> builder,
       RexBuilder rexBuilder, Object... values) {
     ImmutableList.Builder<RexLiteral> b = ImmutableList.builder();
@@ -1165,15 +1235,10 @@ public class RelMetadataTest extends SqlToRelTestBase {
     final Join join = (Join) rel.getInput();
     final RelOptTable empTable = join.getInput(0).getTable();
     final RelOptTable deptTable = join.getInput(1).getTable();
-    Frameworks.withPlanner(
-        new Frameworks.PlannerAction<Void>() {
-          public Void apply(RelOptCluster cluster,
-              RelOptSchema relOptSchema,
-              SchemaPlus rootSchema) {
-            checkAverageRowSize(cluster, empTable, deptTable);
-            return null;
-          }
-        });
+    Frameworks.withPlanner((cluster, relOptSchema, rootSchema) -> {
+      checkAverageRowSize(cluster, empTable, deptTable);
+      return null;
+    });
   }
 
   private void checkAverageRowSize(RelOptCluster cluster, RelOptTable empTable,
@@ -1224,7 +1289,7 @@ public class RelMetadataTest extends SqlToRelTestBase {
 
     // Union
     final LogicalUnion union =
-        LogicalUnion.create(ImmutableList.<RelNode>of(empScan, emptyValues),
+        LogicalUnion.create(ImmutableList.of(empScan, emptyValues),
             true);
     rowSize = mq.getAverageRowSize(union);
     columnSizes = mq.getAverageColumnSizes(union);
@@ -1268,7 +1333,7 @@ public class RelMetadataTest extends SqlToRelTestBase {
     // Join
     final LogicalJoin join =
         LogicalJoin.create(empScan, deptProject, rexBuilder.makeLiteral(true),
-            ImmutableSet.<CorrelationId>of(), JoinRelType.INNER);
+            ImmutableSet.of(), JoinRelType.INNER);
     rowSize = mq.getAverageRowSize(join);
     columnSizes = mq.getAverageColumnSizes(join);
     assertThat(columnSizes.size(), equalTo(13));
@@ -1281,7 +1346,7 @@ public class RelMetadataTest extends SqlToRelTestBase {
     // Aggregate
     final LogicalAggregate aggregate =
         LogicalAggregate.create(join, ImmutableBitSet.of(2, 0),
-            ImmutableList.<ImmutableBitSet>of(),
+            ImmutableList.of(),
             ImmutableList.of(
                 AggregateCall.create(SqlStdOperatorTable.COUNT,
                     false, false, ImmutableIntList.of(),
@@ -1303,21 +1368,16 @@ public class RelMetadataTest extends SqlToRelTestBase {
   }
 
   /** Unit test for
-   * {@link org.apache.calcite.rel.metadata.RelMdPredicates#getPredicates(SemiJoin, RelMetadataQuery)}. */
+   * {@link org.apache.calcite.rel.metadata.RelMdPredicates#getPredicates(Join, RelMetadataQuery)}. */
   @Test public void testPredicates() {
     final Project rel = (Project) convertSql("select * from emp, dept");
     final Join join = (Join) rel.getInput();
     final RelOptTable empTable = join.getInput(0).getTable();
     final RelOptTable deptTable = join.getInput(1).getTable();
-    Frameworks.withPlanner(
-        new Frameworks.PlannerAction<Void>() {
-          public Void apply(RelOptCluster cluster,
-              RelOptSchema relOptSchema,
-              SchemaPlus rootSchema) {
-            checkPredicates(cluster, empTable, deptTable);
-            return null;
-          }
-        });
+    Frameworks.withPlanner((cluster, relOptSchema, rootSchema) -> {
+      checkPredicates(cluster, empTable, deptTable);
+      return null;
+    });
   }
 
   private void checkPredicates(RelOptCluster cluster, RelOptTable empTable,
@@ -1441,9 +1501,15 @@ public class RelMetadataTest extends SqlToRelTestBase {
   /** Test case for
    * <a href="https://issues.apache.org/jira/browse/CALCITE-1960">[CALCITE-1960]
    * RelMdPredicates.getPredicates is slow if there are many equivalent
-   * columns</a>. Since this is a performance problem, the test result does not
+   * columns</a>. There are much less duplicates after
+   * <a href="https://issues.apache.org/jira/browse/CALCITE-2205">[CALCITE-2205]</a>.
+   * Since this is a performance problem, the test result does not
    * change, but takes over 15 minutes before the fix and 6 seconds after. */
   @Test(timeout = 20_000) public void testPullUpPredicatesForExprsItr() {
+    // If we're running Windows, we are probably in a VM and the test may
+    // exceed timeout by a small margin.
+    Assume.assumeThat("Too slow to run on Windows",
+        File.separatorChar, Is.is('/'));
     final String sql = "select a.EMPNO, a.ENAME\n"
         + "from (select * from sales.emp ) a\n"
         + "join (select * from sales.emp  ) b\n"
@@ -1459,10 +1525,14 @@ public class RelMetadataTest extends SqlToRelTestBase {
         + "on b.mgr =a.mgr and a.empno =b.deptno and a.comm=b.comm\n"
         + "  and a.deptno=b.deptno and a.job=b.job and a.ename=b.ename\n"
         + "  and a.mgr=b.deptno and a.slacker=b.slacker";
-    final RelNode rel = convertSql(sql);
-    final RelMetadataQuery mq = RelMetadataQuery.instance();
-    RelOptPredicateList inputSet = mq.getPulledUpPredicates(rel.getInput(0));
-    assertThat(inputSet.pulledUpPredicates.size(), is(131089));
+    // Lock to ensure that only one test is using this method at a time.
+    try (JdbcAdapterTest.LockWrapper ignore =
+             JdbcAdapterTest.LockWrapper.lock(LOCK)) {
+      final RelNode rel = convertSql(sql);
+      final RelMetadataQuery mq = RelMetadataQuery.instance();
+      RelOptPredicateList inputSet = mq.getPulledUpPredicates(rel.getInput(0));
+      assertThat(inputSet.pulledUpPredicates.size(), is(18));
+    }
   }
 
   @Test public void testPullUpPredicatesOnConstant() {
@@ -1800,15 +1870,10 @@ public class RelMetadataTest extends SqlToRelTestBase {
     final Join join = (Join) rel.getInput();
     final RelOptTable empTable = join.getInput(0).getTable();
     final RelOptTable deptTable = join.getInput(1).getTable();
-    Frameworks.withPlanner(
-        new Frameworks.PlannerAction<Void>() {
-          public Void apply(RelOptCluster cluster,
-              RelOptSchema relOptSchema,
-              SchemaPlus rootSchema) {
-            checkAllPredicates(cluster, empTable, deptTable);
-            return null;
-          }
-        });
+    Frameworks.withPlanner((cluster, relOptSchema, rootSchema) -> {
+      checkAllPredicates(cluster, empTable, deptTable);
+      return null;
+    });
   }
 
   private void checkAllPredicates(RelOptCluster cluster, RelOptTable empTable,
@@ -1965,6 +2030,43 @@ public class RelMetadataTest extends SqlToRelTestBase {
         equalTo("[[CATALOG, SALES, DEPT].#0, [CATALOG, SALES, DEPT].#1, "
             + "[CATALOG, SALES, EMP].#0, [CATALOG, SALES, EMP].#1, "
             + "[CATALOG, SALES, EMP].#2, [CATALOG, SALES, EMP].#3]"));
+  }
+
+  @Test public void testAllPredicatesCrossJoinMultiTable() {
+    final String sql = "select x.sal from\n"
+        + "(select a.deptno, c.sal from (select * from emp limit 7) as a\n"
+        + "cross join (select * from dept limit 1) as b\n"
+        + "cross join (select * from emp where empno = 5 limit 2) as c) as x";
+    final RelNode rel = convertSql(sql);
+    final RelMetadataQuery mq = RelMetadataQuery.instance();
+    final Set<RelTableRef> tableReferences = Sets.newTreeSet(mq.getTableReferences(rel));
+    assertThat(tableReferences.toString(),
+        equalTo("[[CATALOG, SALES, DEPT].#0, "
+            + "[CATALOG, SALES, EMP].#0, "
+            + "[CATALOG, SALES, EMP].#1]"));
+    final RelOptPredicateList inputSet = mq.getAllPredicates(rel);
+    // Note that we reference [CATALOG, SALES, EMP].#1 rather than [CATALOG, SALES, EMP].#0
+    assertThat(inputSet.pulledUpPredicates.toString(),
+        equalTo("[true, =([CATALOG, SALES, EMP].#1.$0, 5), true]"));
+  }
+
+  @Test public void testAllPredicatesUnionMultiTable() {
+    final String sql = "select x.sal from\n"
+        + "(select a.deptno, a.sal from (select * from emp) as a\n"
+        + "union all select emp.deptno, emp.sal from emp\n"
+        + "union all select emp.deptno, emp.sal from emp where empno = 5) as x";
+    final RelNode rel = convertSql(sql);
+    final RelMetadataQuery mq = RelMetadataQuery.instance();
+    final Set<RelTableRef> tableReferences = Sets.newTreeSet(mq.getTableReferences(rel));
+    assertThat(tableReferences.toString(),
+        equalTo("[[CATALOG, SALES, EMP].#0, "
+            + "[CATALOG, SALES, EMP].#1, "
+            + "[CATALOG, SALES, EMP].#2]"));
+    // Note that we reference [CATALOG, SALES, EMP].#2 rather than
+    // [CATALOG, SALES, EMP].#0 or [CATALOG, SALES, EMP].#1
+    final RelOptPredicateList inputSet = mq.getAllPredicates(rel);
+    assertThat(inputSet.pulledUpPredicates.toString(),
+        equalTo("[=([CATALOG, SALES, EMP].#2.$0, 5)]"));
   }
 
   private void checkNodeTypeCount(String sql, Map<Class<? extends RelNode>, Integer> expected) {

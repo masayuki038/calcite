@@ -16,25 +16,26 @@
  */
 package org.apache.calcite.test;
 
-import org.apache.calcite.adapter.java.JavaTypeFactory;
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.runtime.CalciteContextException;
 import org.apache.calcite.sql.SqlCollation;
 import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.parser.SqlParseException;
 import org.apache.calcite.sql.parser.SqlParserUtil;
-import org.apache.calcite.sql.test.DefaultSqlTestFactory;
-import org.apache.calcite.sql.test.DelegatingSqlTestFactory;
 import org.apache.calcite.sql.test.SqlTestFactory;
 import org.apache.calcite.sql.test.SqlTester;
 import org.apache.calcite.sql.test.SqlTesterImpl;
-import org.apache.calcite.sql.test.SqlTests;
 import org.apache.calcite.sql.validate.SqlConformance;
 import org.apache.calcite.sql.validate.SqlConformanceEnum;
 import org.apache.calcite.sql.validate.SqlMonotonicity;
 import org.apache.calcite.sql.validate.SqlValidator;
+import org.apache.calcite.test.catalog.MockCatalogReaderExtended;
 import org.apache.calcite.util.TestUtil;
 import org.apache.calcite.util.Util;
+
+import org.junit.rules.MethodRule;
+import org.junit.runners.model.FrameworkMethod;
+import org.junit.runners.model.Statement;
 
 import java.nio.charset.Charset;
 import java.util.regex.Matcher;
@@ -66,12 +67,7 @@ public class SqlValidatorTestCase {
           "(?s)From line ([0-9]+), column ([0-9]+) to line ([0-9]+), column ([0-9]+): (.*)");
 
   private static final SqlTestFactory EXTENDED_TEST_FACTORY =
-      new DelegatingSqlTestFactory(DefaultSqlTestFactory.INSTANCE) {
-        @Override public MockCatalogReader createCatalogReader(
-            SqlTestFactory factory, JavaTypeFactory typeFactory) {
-          return super.createCatalogReader(this, typeFactory).init2();
-        }
-      };
+      SqlTestFactory.INSTANCE.withCatalogReader(MockCatalogReaderExtended::new);
 
   static final SqlTesterImpl EXTENDED_CATALOG_TESTER =
       new SqlTesterImpl(EXTENDED_TEST_FACTORY);
@@ -83,6 +79,8 @@ public class SqlValidatorTestCase {
   static final SqlTesterImpl EXTENDED_CATALOG_TESTER_LENIENT =
       new SqlTesterImpl(EXTENDED_TEST_FACTORY)
           .withConformance(SqlConformanceEnum.LENIENT);
+
+  public static final MethodRule TESTER_CONFIGURATION_RULE = new TesterConfigurationRule();
 
   //~ Instance fields --------------------------------------------------------
 
@@ -104,11 +102,15 @@ public class SqlValidatorTestCase {
    * same set of tests in a different testing environment.
    */
   public SqlTester getTester() {
-    return new SqlTesterImpl(DefaultSqlTestFactory.INSTANCE);
+    return new SqlTesterImpl(SqlTestFactory.INSTANCE);
   }
 
   public final Sql sql(String sql) {
-    return new Sql(tester, sql);
+    return new Sql(tester, sql, true);
+  }
+
+  public final Sql expr(String sql) {
+    return new Sql(tester, sql, false);
   }
 
   public final Sql winSql(String sql) {
@@ -334,6 +336,11 @@ public class SqlValidatorTestCase {
           if (matcher.matches()) {
             actualLine = Integer.parseInt(matcher.group(1));
             actualColumn = Integer.parseInt(matcher.group(2));
+          } else {
+            if (expectedMsgPattern != null
+                && actualMessage.matches(expectedMsgPattern)) {
+              return;
+            }
           }
         }
       }
@@ -555,17 +562,23 @@ public class SqlValidatorTestCase {
     private final SqlTester tester;
     private final String sql;
 
-    Sql(SqlTester tester, String sql) {
+    /** Creates a Sql.
+     *
+     * @param tester Tester
+     * @param sql SQL query or expression
+     * @param query True if {@code sql} is a query, false if it is an expression
+     */
+    Sql(SqlTester tester, String sql, boolean query) {
       this.tester = tester;
-      this.sql = sql;
+      this.sql = query ? sql : SqlTesterImpl.buildQuery(sql);
     }
 
     Sql tester(SqlTester tester) {
-      return new Sql(tester, sql);
+      return new Sql(tester, sql, true);
     }
 
     public Sql sql(String sql) {
-      return new Sql(tester, sql);
+      return new Sql(tester, sql, true);
     }
 
     Sql withExtendedCatalog() {
@@ -615,13 +628,9 @@ public class SqlValidatorTestCase {
     }
 
     public Sql bindType(final String bindType) {
-      tester.check(sql, null,
-          new SqlTester.ParameterChecker() {
-            public void checkParameters(RelDataType parameterRowType) {
-              assertThat(parameterRowType.toString(), is(bindType));
-            }
-          },
-          SqlTests.ANY_RESULT_CHECKER);
+      tester.check(sql, null, parameterRowType ->
+          assertThat(parameterRowType.toString(), is(bindType)),
+          result -> { });
       return this;
     }
 
@@ -629,7 +638,31 @@ public class SqlValidatorTestCase {
      * a test once at a conformance level where it fails, then run it again
      * at a conformance level where it succeeds. */
     public Sql sansCarets() {
-      return new Sql(tester, sql.replace("^", ""));
+      return new Sql(tester, sql.replace("^", ""), true);
+    }
+  }
+
+  /**
+   * Enables to configure {@link #tester} behavior on a per-test basis.
+   * {@code tester} object is created in the test object constructor, and there's no
+   * trivial way to override its features.
+   * <p>This JUnit rule enables post-process test object on a per test method basis</p>
+   */
+  private static class TesterConfigurationRule implements MethodRule {
+    @Override public Statement apply(Statement statement, FrameworkMethod frameworkMethod,
+        Object o) {
+      return new Statement() {
+        @Override public void evaluate() throws Throwable {
+          SqlValidatorTestCase tc = (SqlValidatorTestCase) o;
+          SqlTester tester = tc.tester;
+          WithLex lex = frameworkMethod.getAnnotation(WithLex.class);
+          if (lex != null) {
+            tester = tester.withLex(lex.value());
+          }
+          tc.tester = tester;
+          statement.evaluate();
+        }
+      };
     }
   }
 }

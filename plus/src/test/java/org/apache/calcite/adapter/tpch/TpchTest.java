@@ -17,11 +17,10 @@
 package org.apache.calcite.adapter.tpch;
 
 import org.apache.calcite.plan.RelOptUtil;
-import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.test.CalciteAssert;
+import org.apache.calcite.util.TestUtil;
 import org.apache.calcite.util.Util;
 
-import com.google.common.base.Function;
 import com.google.common.collect.ImmutableList;
 
 import org.junit.Ignore;
@@ -40,11 +39,8 @@ import static org.junit.Assert.assertThat;
  * if {@code -Dcalcite.test.slow} is specified on the command-line.
  * (See {@link org.apache.calcite.test.CalciteAssert#ENABLE_SLOW}.)</p> */
 public class TpchTest {
-  public static final String JAVA_VERSION =
-      System.getProperties().getProperty("java.version");
-
   public static final boolean ENABLE =
-      CalciteAssert.ENABLE_SLOW && JAVA_VERSION.compareTo("1.7") >= 0;
+      CalciteAssert.ENABLE_SLOW && TestUtil.getJavaMajorVersion() >= 7;
 
   private static String schema(String name, String scaleFactor) {
     return "     {\n"
@@ -833,14 +829,11 @@ public class TpchTest {
   @Test public void testQuery02Conversion() {
     query(2, true)
         .enable(ENABLE)
-        .convertMatches(
-          new Function<RelNode, Void>() {
-            public Void apply(RelNode relNode) {
-              String s = RelOptUtil.toString(relNode);
-              assertThat(s, not(containsString("Correlator")));
-              return null;
-            }
-          });
+        .convertMatches(relNode -> {
+          String s = RelOptUtil.toString(relNode);
+          assertThat(s, not(containsString("Correlator")));
+          return null;
+        });
   }
 
   @Test public void testQuery03() {

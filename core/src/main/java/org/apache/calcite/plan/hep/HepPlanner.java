@@ -24,6 +24,7 @@ import org.apache.calcite.plan.Context;
 import org.apache.calcite.plan.RelOptCost;
 import org.apache.calcite.plan.RelOptCostFactory;
 import org.apache.calcite.plan.RelOptCostImpl;
+import org.apache.calcite.plan.RelOptMaterialization;
 import org.apache.calcite.plan.RelOptPlanner;
 import org.apache.calcite.plan.RelOptRule;
 import org.apache.calcite.plan.RelOptRuleOperand;
@@ -96,6 +97,9 @@ public class HepPlanner extends AbstractRelOptPlanner {
 
   private final Function2<RelNode, RelNode, Void> onCopyHook;
 
+  private final List<RelOptMaterialization> materializations =
+      new ArrayList<>();
+
   //~ Constructors -----------------------------------------------------------
 
   /**
@@ -133,7 +137,7 @@ public class HepPlanner extends AbstractRelOptPlanner {
     super(costFactory, context);
     this.mainProgram = program;
     this.onCopyHook =
-        Util.first(onCopyHook, Functions.<RelNode, RelNode, Void>ignore2());
+        Util.first(onCopyHook, Functions.ignore2());
     mapDigestToVertex = new HashMap<>();
     graph = DefaultDirectedGraph.create();
 
@@ -174,6 +178,7 @@ public class HepPlanner extends AbstractRelOptPlanner {
     for (RelOptRule rule : ImmutableList.copyOf(allRules)) {
       removeRule(rule);
     }
+    this.materializations.clear();
   }
 
   public boolean removeRule(RelOptRule rule) {
@@ -232,7 +237,7 @@ public class HepPlanner extends AbstractRelOptPlanner {
 
   void executeInstruction(
       HepInstruction.MatchOrder instruction) {
-    LOGGER.trace("Setting match limit to {}", instruction.order);
+    LOGGER.trace("Setting match order to {}", instruction.order);
     currentProgram.matchOrder = instruction.order;
   }
 
@@ -360,6 +365,33 @@ public class HepPlanner extends AbstractRelOptPlanner {
     LOGGER.trace("Leaving group");
   }
 
+  private int depthFirstApply(Iterator<HepRelVertex> iter,
+      Collection<RelOptRule> rules,
+      boolean forceConversions, int nMatches) {
+    while (iter.hasNext()) {
+      HepRelVertex vertex = iter.next();
+      for (RelOptRule rule : rules) {
+        HepRelVertex newVertex =
+            applyRule(rule, vertex, forceConversions);
+        if (newVertex == null || newVertex == vertex) {
+          continue;
+        }
+        ++nMatches;
+        if (nMatches >= currentProgram.matchLimit) {
+          return nMatches;
+        }
+        // To the extent possible, pick up where we left
+        // off; have to create a new iterator because old
+        // one was invalidated by transformation.
+        Iterator<HepRelVertex> depthIter = getGraphIterator(newVertex);
+        nMatches = depthFirstApply(depthIter, rules, forceConversions,
+            nMatches);
+        break;
+      }
+    }
+    return nMatches;
+  }
+
   private void applyRules(
       Collection<RelOptRule> rules,
       boolean forceConversions) {
@@ -372,41 +404,49 @@ public class HepPlanner extends AbstractRelOptPlanner {
     LOGGER.trace("Applying rule set {}", rules);
 
     boolean fullRestartAfterTransformation =
-        currentProgram.matchOrder != HepMatchOrder.ARBITRARY;
+        currentProgram.matchOrder != HepMatchOrder.ARBITRARY
+        && currentProgram.matchOrder != HepMatchOrder.DEPTH_FIRST;
 
     int nMatches = 0;
 
-    boolean fixpoint;
+    boolean fixedPoint;
     do {
       Iterator<HepRelVertex> iter = getGraphIterator(root);
-      fixpoint = true;
+      fixedPoint = true;
       while (iter.hasNext()) {
         HepRelVertex vertex = iter.next();
         for (RelOptRule rule : rules) {
           HepRelVertex newVertex =
               applyRule(rule, vertex, forceConversions);
-          if (newVertex != null) {
-            ++nMatches;
-            if (nMatches >= currentProgram.matchLimit) {
-              return;
-            }
-            if (fullRestartAfterTransformation) {
-              iter = getGraphIterator(root);
-            } else {
-              // To the extent possible, pick up where we left
-              // off; have to create a new iterator because old
-              // one was invalidated by transformation.
-              iter = getGraphIterator(newVertex);
-
-              // Remember to go around again since we're
-              // skipping some stuff.
-              fixpoint = false;
-            }
-            break;
+          if (newVertex == null || newVertex == vertex) {
+            continue;
           }
+          ++nMatches;
+          if (nMatches >= currentProgram.matchLimit) {
+            return;
+          }
+          if (fullRestartAfterTransformation) {
+            iter = getGraphIterator(root);
+          } else {
+            // To the extent possible, pick up where we left
+            // off; have to create a new iterator because old
+            // one was invalidated by transformation.
+            iter = getGraphIterator(newVertex);
+            if (currentProgram.matchOrder == HepMatchOrder.DEPTH_FIRST) {
+              nMatches =
+                  depthFirstApply(iter, rules, forceConversions, nMatches);
+              if (nMatches >= currentProgram.matchLimit) {
+                return;
+              }
+            }
+            // Remember to go around again since we're
+            // skipping some stuff.
+            fixedPoint = false;
+          }
+          break;
         }
       }
-    } while (!fixpoint);
+    } while (!fixedPoint);
   }
 
   private Iterator<HepRelVertex> getGraphIterator(HepRelVertex start) {
@@ -420,39 +460,52 @@ public class HepPlanner extends AbstractRelOptPlanner {
     // better optimizer performance.
     collectGarbage();
 
-    if (currentProgram.matchOrder == HepMatchOrder.ARBITRARY) {
+    switch (currentProgram.matchOrder) {
+    case ARBITRARY:
+    case DEPTH_FIRST:
       return DepthFirstIterator.of(graph, start).iterator();
-    }
 
-    assert start == root;
+    case TOP_DOWN:
+      assert start == root;
+      // see above
+/*
+        collectGarbage();
+*/
+      return TopologicalOrderIterator.of(graph).iterator();
 
-    // see above
+    case BOTTOM_UP:
+    default:
+      assert start == root;
+
+      // see above
 /*
         collectGarbage();
 */
 
-    Iterable<HepRelVertex> iter =
-        TopologicalOrderIterator.of(graph);
-
-    if (currentProgram.matchOrder == HepMatchOrder.TOP_DOWN) {
-      return iter.iterator();
+      // TODO jvs 4-Apr-2006:  enhance TopologicalOrderIterator
+      // to support reverse walk.
+      final List<HepRelVertex> list = new ArrayList<>();
+      for (HepRelVertex vertex : TopologicalOrderIterator.of(graph)) {
+        list.add(vertex);
+      }
+      Collections.reverse(list);
+      return list.iterator();
     }
+  }
 
-    // TODO jvs 4-Apr-2006:  enhance TopologicalOrderIterator
-    // to support reverse walk.
-    assert currentProgram.matchOrder == HepMatchOrder.BOTTOM_UP;
-    final List<HepRelVertex> list = new ArrayList<>();
-    for (HepRelVertex vertex : iter) {
-      list.add(vertex);
-    }
-    Collections.reverse(list);
-    return list.iterator();
+  /** Returns whether the vertex is valid. */
+  private boolean belongsToDag(HepRelVertex vertex) {
+    String digest = vertex.getCurrentRel().getDigest();
+    return mapDigestToVertex.get(digest) != null;
   }
 
   private HepRelVertex applyRule(
       RelOptRule rule,
       HepRelVertex vertex,
       boolean forceConversions) {
+    if (!belongsToDag(vertex)) {
+      return null;
+    }
     RelTrait parentTrait = null;
     List<RelNode> parents = null;
     if (rule instanceof ConverterRule) {
@@ -496,7 +549,7 @@ public class HepPlanner extends AbstractRelOptPlanner {
         new HepRuleCall(
             this,
             rule.getOperand(),
-            bindings.toArray(new RelNode[bindings.size()]),
+            bindings.toArray(new RelNode[0]),
             nodeChildren,
             parents);
 
@@ -746,7 +799,7 @@ public class HepPlanner extends AbstractRelOptPlanner {
       RelNode rel) {
     // Check if a transformation already produced a reference
     // to an existing vertex.
-    if (rel instanceof HepRelVertex) {
+    if (graph.vertexSet().contains(rel)) {
       return (HepRelVertex) rel;
     }
 
@@ -764,6 +817,9 @@ public class HepPlanner extends AbstractRelOptPlanner {
       rel = rel.copy(rel.getTraitSet(), newInputs);
       onCopy(oldRel, rel);
     }
+    // Compute digest first time we add to DAG,
+    // otherwise can't get equivVertex for common sub-expression
+    rel.recomputeDigest();
 
     // try to find equivalent rel only if DAG is allowed
     if (!noDAG) {
@@ -839,15 +895,15 @@ public class HepPlanner extends AbstractRelOptPlanner {
     if (mapDigestToVertex.get(oldDigest) == vertex) {
       mapDigestToVertex.remove(oldDigest);
     }
-    String newDigest = rel.recomputeDigest();
-    if (mapDigestToVertex.get(newDigest) == null) {
-      mapDigestToVertex.put(newDigest, vertex);
-    } else {
-      // REVIEW jvs 5-Apr-2006:  Could this lead us to
-      // miss common subexpressions?  When called from
-      // addRelToGraph, we'll check after this method returns,
-      // but what about the other callers?
-    }
+    String newDigest = rel.getDigest();
+    // When a transformation happened in one rule apply, support
+    // vertex2 replace vertex1, but the current relNode of
+    // vertex1 and vertex2 is same,
+    // then the digest is also same. but we can't remove vertex2,
+    // otherwise the digest will be removed wrongly in the mapDigestToVertex
+    //  when collectGC
+    // so it must update the digest that map to vertex
+    mapDigestToVertex.put(newDigest, vertex);
     if (rel != vertex.getCurrentRel()) {
       vertex.replaceRel(rel);
     }
@@ -972,6 +1028,14 @@ public class HepPlanner extends AbstractRelOptPlanner {
     // to keep a timestamp per HepRelVertex, and update only affected
     // vertices and all ancestors on each transformation.
     return nTransformations;
+  }
+
+  @Override public ImmutableList<RelOptMaterialization> getMaterializations() {
+    return ImmutableList.copyOf(materializations);
+  }
+
+  @Override public void addMaterialization(RelOptMaterialization materialization) {
+    materializations.add(materialization);
   }
 }
 

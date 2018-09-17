@@ -46,6 +46,10 @@ public class HsqldbSqlDialect extends SqlDialect {
     return false;
   }
 
+  @Override public boolean supportsWindowFunctions() {
+    return false;
+  }
+
   @Override public void unparseCall(SqlWriter writer, SqlCall call,
       int leftPrec, int rightPrec) {
     switch (call.getKind()) {
@@ -67,6 +71,11 @@ public class HsqldbSqlDialect extends SqlDialect {
     default:
       super.unparseCall(writer, call, leftPrec, rightPrec);
     }
+  }
+
+  @Override public void unparseOffsetFetch(SqlWriter writer, SqlNode offset,
+      SqlNode fetch) {
+    unparseFetchUsingLimit(writer, offset, fetch);
   }
 
   @Override public SqlNode rewriteSingleValueExpr(SqlNode aggCall) {

@@ -45,7 +45,8 @@ public static class HrSchema {
 Class.forName("org.apache.calcite.jdbc.Driver");
 Properties info = new Properties();
 info.setProperty("lex", "JAVA");
-Connection connection = DriverManager.getConnection("jdbc:calcite:", info);
+Connection connection =
+    DriverManager.getConnection("jdbc:calcite:", info);
 CalciteConnection calciteConnection =
     connection.unwrap(CalciteConnection.class);
 SchemaPlus rootSchema = calciteConnection.getRootSchema();
@@ -139,7 +140,7 @@ The following features are complete.
   FIRST/LAST), set operations (UNION, INTERSECT, MINUS), sub-queries
   (including correlated sub-queries), windowed aggregates, LIMIT
   (syntax as <a
-  href="http://www.postgresql.org/docs/8.4/static/sql-select.html#SQL-LIMIT">Postgres</a>);
+  href="https://www.postgresql.org/docs/8.4/static/sql-select.html#SQL-LIMIT">Postgres</a>);
   more details in the [SQL reference](reference.html)
 * Local and remote JDBC drivers; see [Avatica](avatica_overview.html)
 * Several [adapters](adapter.html)

@@ -17,8 +17,6 @@
 package org.apache.calcite.sql.fun;
 
 import org.apache.calcite.avatica.util.TimeUnit;
-import org.apache.calcite.rel.type.RelDataType;
-import org.apache.calcite.rel.type.RelDataTypeFactory;
 import org.apache.calcite.sql.SqlAggFunction;
 import org.apache.calcite.sql.SqlAsOperator;
 import org.apache.calcite.sql.SqlBasicCall;
@@ -36,7 +34,6 @@ import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.SqlNumericLiteral;
 import org.apache.calcite.sql.SqlOperandCountRange;
 import org.apache.calcite.sql.SqlOperator;
-import org.apache.calcite.sql.SqlOperatorBinding;
 import org.apache.calcite.sql.SqlOverOperator;
 import org.apache.calcite.sql.SqlPostfixOperator;
 import org.apache.calcite.sql.SqlPrefixOperator;
@@ -51,7 +48,6 @@ import org.apache.calcite.sql.SqlValuesOperator;
 import org.apache.calcite.sql.SqlWindow;
 import org.apache.calcite.sql.SqlWriter;
 import org.apache.calcite.sql.type.InferTypes;
-import org.apache.calcite.sql.type.IntervalSqlType;
 import org.apache.calcite.sql.type.OperandTypes;
 import org.apache.calcite.sql.type.ReturnTypes;
 import org.apache.calcite.sql.type.SqlOperandCountRanges;
@@ -106,39 +102,39 @@ public class SqlStdOperatorTable extends ReflectiveSqlOperatorTable {
       new SqlSetOperator("INTERSECT ALL", SqlKind.INTERSECT, 18, true);
 
   /**
-   * The "MULTISET UNION" operator.
+   * The {@code MULTISET UNION DISTINCT} operator.
    */
-  public static final SqlMultisetSetOperator MULTISET_UNION =
-      new SqlMultisetSetOperator("MULTISET UNION", 14, false);
+  public static final SqlMultisetSetOperator MULTISET_UNION_DISTINCT =
+      new SqlMultisetSetOperator("MULTISET UNION DISTINCT", 14, false);
 
   /**
-   * The "MULTISET UNION ALL" operator.
+   * The {@code MULTISET UNION [ALL]} operator.
    */
-  public static final SqlMultisetSetOperator MULTISET_UNION_ALL =
+  public static final SqlMultisetSetOperator MULTISET_UNION =
       new SqlMultisetSetOperator("MULTISET UNION ALL", 14, true);
 
   /**
-   * The "MULTISET EXCEPT" operator.
+   * The {@code MULTISET EXCEPT DISTINCT} operator.
    */
-  public static final SqlMultisetSetOperator MULTISET_EXCEPT =
-      new SqlMultisetSetOperator("MULTISET EXCEPT", 14, false);
+  public static final SqlMultisetSetOperator MULTISET_EXCEPT_DISTINCT =
+      new SqlMultisetSetOperator("MULTISET EXCEPT DISTINCT", 14, false);
 
   /**
-   * The "MULTISET EXCEPT ALL" operator.
+   * The {@code MULTISET EXCEPT [ALL]} operator.
    */
-  public static final SqlMultisetSetOperator MULTISET_EXCEPT_ALL =
+  public static final SqlMultisetSetOperator MULTISET_EXCEPT =
       new SqlMultisetSetOperator("MULTISET EXCEPT ALL", 14, true);
 
   /**
-   * The "MULTISET INTERSECT" operator.
+   * The {@code MULTISET INTERSECT DISTINCT} operator.
    */
-  public static final SqlMultisetSetOperator MULTISET_INTERSECT =
-      new SqlMultisetSetOperator("MULTISET INTERSECT", 18, false);
+  public static final SqlMultisetSetOperator MULTISET_INTERSECT_DISTINCT =
+      new SqlMultisetSetOperator("MULTISET INTERSECT DISTINCT", 18, false);
 
   /**
-   * The "MULTISET INTERSECT ALL" operator.
+   * The {@code MULTISET INTERSECT [ALL]} operator.
    */
-  public static final SqlMultisetSetOperator MULTISET_INTERSECT_ALL =
+  public static final SqlMultisetSetOperator MULTISET_INTERSECT =
       new SqlMultisetSetOperator("MULTISET INTERSECT ALL", 18, true);
 
   //-------------------------------------------------------------
@@ -535,28 +531,7 @@ public class SqlStdOperatorTable extends ReflectiveSqlOperatorTable {
    * Infix datetime plus operator, '<code>DATETIME + INTERVAL</code>'.
    */
   public static final SqlSpecialOperator DATETIME_PLUS =
-      new SqlSpecialOperator("DATETIME_PLUS", SqlKind.PLUS, 40, true, null,
-          InferTypes.FIRST_KNOWN, OperandTypes.PLUS_OPERATOR) {
-        @Override public RelDataType
-        inferReturnType(SqlOperatorBinding opBinding) {
-          final RelDataTypeFactory typeFactory = opBinding.getTypeFactory();
-          final RelDataType leftType = opBinding.getOperandType(0);
-          final IntervalSqlType unitType =
-              (IntervalSqlType) opBinding.getOperandType(1);
-          switch (unitType.getIntervalQualifier().getStartUnit()) {
-          case HOUR:
-          case MINUTE:
-          case SECOND:
-          case MILLISECOND:
-          case MICROSECOND:
-            return typeFactory.createTypeWithNullability(
-                typeFactory.createSqlType(SqlTypeName.TIMESTAMP),
-                leftType.isNullable() || unitType.isNullable());
-          default:
-            return leftType;
-          }
-        }
-      };
+      new SqlDatetimePlusOperator();
 
   /**
    * Multiset {@code MEMBER OF}, which returns whether a element belongs to a
@@ -595,6 +570,18 @@ public class SqlStdOperatorTable extends ReflectiveSqlOperatorTable {
       // TODO: check if precedence is correct
       new SqlBinaryOperator(
           "SUBMULTISET OF",
+          SqlKind.OTHER,
+          30,
+          true,
+          ReturnTypes.BOOLEAN_NULLABLE,
+          null,
+          OperandTypes.MULTISET_MULTISET);
+
+  public static final SqlBinaryOperator NOT_SUBMULTISET_OF =
+
+      // TODO: check if precedence is correct
+      new SqlBinaryOperator(
+          "NOT SUBMULTISET OF",
           SqlKind.OTHER,
           30,
           true,
@@ -712,6 +699,33 @@ public class SqlStdOperatorTable extends ReflectiveSqlOperatorTable {
           ReturnTypes.BOOLEAN,
           null,
           OperandTypes.MULTISET);
+
+  public static final SqlPostfixOperator IS_NOT_A_SET =
+      new SqlPostfixOperator(
+          "IS NOT A SET",
+          SqlKind.OTHER,
+          28,
+          ReturnTypes.BOOLEAN,
+          null,
+          OperandTypes.MULTISET);
+
+  public static final SqlPostfixOperator IS_EMPTY =
+      new SqlPostfixOperator(
+          "IS EMPTY",
+          SqlKind.OTHER,
+          28,
+          ReturnTypes.BOOLEAN,
+          null,
+          OperandTypes.COLLECTION_OR_MAP);
+
+  public static final SqlPostfixOperator IS_NOT_EMPTY =
+      new SqlPostfixOperator(
+          "IS NOT EMPTY",
+          SqlKind.OTHER,
+          28,
+          ReturnTypes.BOOLEAN,
+          null,
+          OperandTypes.COLLECTION_OR_MAP);
 
   //-------------------------------------------------------------
   //                   PREFIX OPERATORS
@@ -847,10 +861,22 @@ public class SqlStdOperatorTable extends ReflectiveSqlOperatorTable {
       new SqlFirstLastValueAggFunction(SqlKind.LAST_VALUE);
 
   /**
+   * <code>ANY_VALUE</code> aggregate function.
+   */
+  public static final SqlAggFunction ANY_VALUE =
+      new SqlAnyValueAggFunction(SqlKind.ANY_VALUE);
+
+  /**
    * <code>FIRST_VALUE</code> aggregate function.
    */
   public static final SqlAggFunction FIRST_VALUE =
       new SqlFirstLastValueAggFunction(SqlKind.FIRST_VALUE);
+
+  /**
+   * <code>NTH_VALUE</code> aggregate function.
+   */
+  public static final SqlAggFunction NTH_VALUE =
+      new SqlNthValueAggFunction(SqlKind.NTH_VALUE);
 
   /**
    * <code>LEAD</code> aggregate function.
@@ -887,6 +913,12 @@ public class SqlStdOperatorTable extends ReflectiveSqlOperatorTable {
    */
   public static final SqlAggFunction STDDEV_POP =
       new SqlAvgAggFunction(SqlKind.STDDEV_POP);
+
+  /**
+   * <code>REGR_COUNT</code> aggregate function.
+   */
+  public static final SqlAggFunction REGR_COUNT =
+      new SqlRegrCountAggFunction(SqlKind.REGR_COUNT);
 
   /**
    * <code>REGR_SXX</code> aggregate function.
@@ -1943,7 +1975,7 @@ public class SqlStdOperatorTable extends ReflectiveSqlOperatorTable {
   /**
    * The FUSION operator. Multiset aggregator function.
    */
-  public static final SqlFunction FUSION =
+  public static final SqlAggFunction FUSION =
       new SqlAggFunction("FUSION", null,
           SqlKind.FUSION,
           ReturnTypes.ARG0,
@@ -2006,9 +2038,11 @@ public class SqlStdOperatorTable extends ReflectiveSqlOperatorTable {
 
   /** The {@code TUMBLE} group function. */
   public static final SqlGroupedWindowFunction TUMBLE =
-      new SqlGroupedWindowFunction(SqlKind.TUMBLE, null,
+      new SqlGroupedWindowFunction(SqlKind.TUMBLE.name(), SqlKind.TUMBLE,
+          null, ReturnTypes.ARG0, null,
           OperandTypes.or(OperandTypes.DATETIME_INTERVAL,
-              OperandTypes.DATETIME_INTERVAL_TIME)) {
+              OperandTypes.DATETIME_INTERVAL_TIME),
+          SqlFunctionCategory.SYSTEM) {
         @Override public List<SqlGroupedWindowFunction> getAuxiliaryFunctions() {
           return ImmutableList.of(TUMBLE_START, TUMBLE_END);
         }
@@ -2026,9 +2060,11 @@ public class SqlStdOperatorTable extends ReflectiveSqlOperatorTable {
 
   /** The {@code HOP} group function. */
   public static final SqlGroupedWindowFunction HOP =
-      new SqlGroupedWindowFunction(SqlKind.HOP, null,
+      new SqlGroupedWindowFunction(SqlKind.HOP.name(), SqlKind.HOP, null,
+          ReturnTypes.ARG0, null,
           OperandTypes.or(OperandTypes.DATETIME_INTERVAL_INTERVAL,
-              OperandTypes.DATETIME_INTERVAL_INTERVAL_TIME)) {
+              OperandTypes.DATETIME_INTERVAL_INTERVAL_TIME),
+          SqlFunctionCategory.SYSTEM) {
         @Override public List<SqlGroupedWindowFunction> getAuxiliaryFunctions() {
           return ImmutableList.of(HOP_START, HOP_END);
         }
@@ -2046,9 +2082,11 @@ public class SqlStdOperatorTable extends ReflectiveSqlOperatorTable {
 
   /** The {@code SESSION} group function. */
   public static final SqlGroupedWindowFunction SESSION =
-      new SqlGroupedWindowFunction(SqlKind.SESSION, null,
+      new SqlGroupedWindowFunction(SqlKind.SESSION.name(), SqlKind.SESSION,
+          null, ReturnTypes.ARG0, null,
           OperandTypes.or(OperandTypes.DATETIME_INTERVAL,
-              OperandTypes.DATETIME_INTERVAL_TIME)) {
+              OperandTypes.DATETIME_INTERVAL_TIME),
+          SqlFunctionCategory.SYSTEM) {
         @Override public List<SqlGroupedWindowFunction> getAuxiliaryFunctions() {
           return ImmutableList.of(SESSION_START, SESSION_END);
         }
@@ -2222,7 +2260,7 @@ public class SqlStdOperatorTable extends ReflectiveSqlOperatorTable {
       for (final SqlGroupedWindowFunction f
           : ((SqlGroupedWindowFunction) op).getAuxiliaryFunctions()) {
         builder.add(
-            Pair.<SqlNode, AuxiliaryConverter>of(copy(call, f),
+            Pair.of(copy(call, f),
                 new AuxiliaryConverter.Impl(f)));
       }
       return builder.build();
@@ -2233,7 +2271,7 @@ public class SqlStdOperatorTable extends ReflectiveSqlOperatorTable {
   /** Creates a copy of a call with a new operator. */
   private static SqlCall copy(SqlCall call, SqlOperator operator) {
     final List<SqlNode> list = call.getOperandList();
-    return new SqlBasicCall(operator, list.toArray(new SqlNode[list.size()]),
+    return new SqlBasicCall(operator, list.toArray(new SqlNode[0]),
         call.getParserPosition());
   }
 
@@ -2276,6 +2314,7 @@ public class SqlStdOperatorTable extends ReflectiveSqlOperatorTable {
       throw new AssertionError(comparisonKind);
     }
   }
+
 }
 
 // End SqlStdOperatorTable.java

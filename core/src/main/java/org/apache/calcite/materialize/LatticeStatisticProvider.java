@@ -16,12 +16,21 @@
  */
 package org.apache.calcite.materialize;
 
+import java.util.List;
+import java.util.function.Function;
+
 /**
  * Estimates row counts for a lattice and its attributes.
  */
 public interface LatticeStatisticProvider {
-  /** Returns an estimate of the number of distinct values in a column. */
-  int cardinality(Lattice lattice, Lattice.Column column);
+  /** Returns an estimate of the number of distinct values in a column
+   * or list of columns. */
+  double cardinality(List<Lattice.Column> columns);
+
+  /** Creates a {@link LatticeStatisticProvider} for a given
+   * {@link org.apache.calcite.materialize.Lattice}. */
+  interface Factory extends Function<Lattice, LatticeStatisticProvider> {
+  }
 }
 
 // End LatticeStatisticProvider.java

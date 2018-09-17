@@ -333,7 +333,9 @@ public class FlatLists {
         Flat1List that = (Flat1List) o;
         return Objects.equals(this.t0, that.t0);
       }
-      return Collections.singletonList(t0).equals(o);
+      return o instanceof List
+          && ((List) o).size() == 1
+          && Objects.equals(t0, ((List) o).get(0));
     }
 
     public int hashCode() {
@@ -370,6 +372,10 @@ public class FlatLists {
 
     @SuppressWarnings({"unchecked" })
     public <T2> T2[] toArray(T2[] a) {
+      if (a.length < 1) {
+        // Make a new array of a's runtime type, but my contents:
+        return (T2[]) Arrays.copyOf(toArray(), 1, a.getClass());
+      }
       a[0] = (T2) t0;
       return a;
     }
@@ -444,7 +450,11 @@ public class FlatLists {
         return Objects.equals(this.t0, that.t0)
             && Objects.equals(this.t1, that.t1);
       }
-      return Arrays.asList(t0, t1).equals(o);
+      if (o instanceof List) {
+        List lo = (List) o;
+        return lo.size() == 2 && o.equals(this);
+      }
+      return false;
     }
 
     public int hashCode() {
@@ -494,6 +504,10 @@ public class FlatLists {
 
     @SuppressWarnings({"unchecked" })
     public <T2> T2[] toArray(T2[] a) {
+      if (a.length < 2) {
+        // Make a new array of a's runtime type, but my contents:
+        return (T2[]) Arrays.copyOf(toArray(), 2, a.getClass());
+      }
       a[0] = (T2) t0;
       a[1] = (T2) t1;
       return a;
@@ -574,7 +588,9 @@ public class FlatLists {
             && Objects.equals(this.t1, that.t1)
             && Objects.equals(this.t2, that.t2);
       }
-      return o.equals(this);
+      return o instanceof List
+          && ((List) o).size() == 3
+          && Arrays.asList(t0, t1, t2).equals(o);
     }
 
     public int hashCode() {
@@ -637,6 +653,10 @@ public class FlatLists {
 
     @SuppressWarnings({"unchecked" })
     public <T2> T2[] toArray(T2[] a) {
+      if (a.length < 3) {
+        // Make a new array of a's runtime type, but my contents:
+        return (T2[]) Arrays.copyOf(toArray(), 3, a.getClass());
+      }
       a[0] = (T2) t0;
       a[1] = (T2) t1;
       a[2] = (T2) t2;
@@ -686,7 +706,7 @@ public class FlatLists {
     }
 
     public String toString() {
-      return "[" + t0 + ", " + t1 + ", " + t2 + "," + t3 + "]";
+      return "[" + t0 + ", " + t1 + ", " + t2 + ", " + t3 + "]";
     }
 
     public T get(int index) {
@@ -723,7 +743,9 @@ public class FlatLists {
             && Objects.equals(this.t2, that.t2)
             && Objects.equals(this.t3, that.t3);
       }
-      return o.equals(this);
+      return o instanceof List
+          && ((List) o).size() == 4
+          && Arrays.asList(t0, t1, t2, t3).equals(o);
     }
 
     public int hashCode() {
@@ -799,6 +821,10 @@ public class FlatLists {
 
     @SuppressWarnings({"unchecked" })
     public <T2> T2[] toArray(T2[] a) {
+      if (a.length < 4) {
+        // Make a new array of a's runtime type, but my contents:
+        return (T2[]) Arrays.copyOf(toArray(), 4, a.getClass());
+      }
       a[0] = (T2) t0;
       a[1] = (T2) t1;
       a[2] = (T2) t2;
@@ -851,7 +877,7 @@ public class FlatLists {
     }
 
     public String toString() {
-      return "[" + t0 + ", " + t1 + ", " + t2 + "," + t3 + ", " + t4 + "]";
+      return "[" + t0 + ", " + t1 + ", " + t2 + ", " + t3 + ", " + t4 + "]";
     }
 
     public T get(int index) {
@@ -891,7 +917,9 @@ public class FlatLists {
             && Objects.equals(this.t3, that.t3)
             && Objects.equals(this.t4, that.t4);
       }
-      return o.equals(this);
+      return o instanceof List
+          && ((List) o).size() == 5
+          && Arrays.asList(t0, t1, t2, t3, t4).equals(o);
     }
 
     public int hashCode() {
@@ -980,6 +1008,10 @@ public class FlatLists {
 
     @SuppressWarnings({"unchecked" })
     public <T2> T2[] toArray(T2[] a) {
+      if (a.length < 5) {
+        // Make a new array of a's runtime type, but my contents:
+        return (T2[]) Arrays.copyOf(toArray(), 5, a.getClass());
+      }
       a[0] = (T2) t0;
       a[1] = (T2) t1;
       a[2] = (T2) t2;
@@ -1035,7 +1067,7 @@ public class FlatLists {
     }
 
     public String toString() {
-      return "[" + t0 + ", " + t1 + ", " + t2 + "," + t3 + ", " + t4
+      return "[" + t0 + ", " + t1 + ", " + t2 + ", " + t3 + ", " + t4
           + ", " + t5 + "]";
     }
 
@@ -1079,7 +1111,9 @@ public class FlatLists {
             && Objects.equals(this.t4, that.t4)
             && Objects.equals(this.t5, that.t5);
       }
-      return o.equals(this);
+      return o instanceof List
+          && ((List) o).size() == 6
+          && Arrays.asList(t0, t1, t2, t3, t4, t5).equals(o);
     }
 
     public int hashCode() {
@@ -1181,6 +1215,10 @@ public class FlatLists {
 
     @SuppressWarnings({"unchecked" })
     public <T2> T2[] toArray(T2[] a) {
+      if (a.length < 6) {
+        // Make a new array of a's runtime type, but my contents:
+        return (T2[]) Arrays.copyOf(toArray(), 6, a.getClass());
+      }
       a[0] = (T2) t0;
       a[1] = (T2) t1;
       a[2] = (T2) t2;

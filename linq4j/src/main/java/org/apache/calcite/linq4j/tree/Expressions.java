@@ -24,6 +24,8 @@ import org.apache.calcite.linq4j.function.Function2;
 import org.apache.calcite.linq4j.function.Predicate1;
 import org.apache.calcite.linq4j.function.Predicate2;
 
+import com.google.common.collect.ImmutableList;
+
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Member;
@@ -524,7 +526,7 @@ public abstract class Expressions {
    */
   public static ConditionalExpression condition(Expression test,
       Expression ifTrue, Expression ifFalse, Type type) {
-    return new ConditionalExpression(Arrays.<Node>asList(test, ifFalse, ifTrue),
+    return new ConditionalExpression(Arrays.asList(test, ifFalse, ifTrue),
         type);
   }
 
@@ -962,7 +964,7 @@ public abstract class Expressions {
    * block with an if statement.
    */
   public static ConditionalStatement ifThen(Expression test, Node ifTrue) {
-    return new ConditionalStatement(Arrays.<Node>asList(test, ifTrue));
+    return new ConditionalStatement(Arrays.asList(test, ifTrue));
   }
 
   /**
@@ -971,7 +973,7 @@ public abstract class Expressions {
    */
   public static ConditionalStatement ifThenElse(Expression test, Node ifTrue,
       Node ifFalse) {
-    return new ConditionalStatement(Arrays.<Node>asList(test, ifTrue, ifFalse));
+    return new ConditionalStatement(Arrays.asList(test, ifTrue, ifFalse));
   }
 
   /**
@@ -1605,8 +1607,14 @@ public abstract class Expressions {
    */
   public static UnaryExpression makeUnary(ExpressionType expressionType,
       Expression expression) {
-    return new UnaryExpression(expressionType, expression.getType(),
-        expression);
+    Type type = expression.getType();
+    switch (expressionType) {
+    case Negate:
+      if (type == byte.class || type == short.class) {
+        type = int.class;
+      }
+    }
+    return new UnaryExpression(expressionType, type, expression);
   }
 
   /**
@@ -1908,8 +1916,7 @@ public abstract class Expressions {
    * constructor that takes no arguments.
    */
   public static NewExpression new_(Constructor constructor) {
-    return new_(
-        constructor.getDeclaringClass(), Collections.<Expression>emptyList());
+    return new_(constructor.getDeclaringClass(), ImmutableList.of());
   }
 
   /**
@@ -1917,7 +1924,7 @@ public abstract class Expressions {
    * parameterless constructor of the specified type.
    */
   public static NewExpression new_(Type type) {
-    return new_(type, Collections.<Expression>emptyList());
+    return new_(type, ImmutableList.of());
   }
 
   /**
@@ -2831,8 +2838,7 @@ public abstract class Expressions {
    * finally block and no catch statements.
    */
   public static TryStatement tryFinally(Statement body, Statement finally_) {
-    return new TryStatement(body, Collections.<CatchBlock>emptyList(),
-        finally_);
+    return new TryStatement(body, ImmutableList.of(), finally_);
   }
 
   /**
@@ -2934,6 +2940,9 @@ public abstract class Expressions {
    */
   public static DeclarationStatement declare(int modifiers, String name,
       Expression initializer) {
+    assert initializer != null
+        : "empty initializer for variable declaration with name '" + name + "', modifiers "
+        + modifiers + ". Please use declare(int, ParameterExpression, initializer) instead";
     return declare(modifiers, parameter(initializer.getType(), name),
         initializer);
   }

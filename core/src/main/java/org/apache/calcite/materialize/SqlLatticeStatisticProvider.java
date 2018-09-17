@@ -23,25 +23,45 @@ import org.apache.calcite.util.ImmutableBitSet;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Objects;
+
 /**
  * Implementation of {@link LatticeStatisticProvider} that gets statistics by
  * executing "SELECT COUNT(DISTINCT ...) ..." SQL queries.
  */
 class SqlLatticeStatisticProvider implements LatticeStatisticProvider {
-  static final SqlLatticeStatisticProvider INSTANCE =
-      new SqlLatticeStatisticProvider();
+  static final Factory FACTORY = SqlLatticeStatisticProvider::new;
 
-  /** Creates an SqlLatticeStatisticProvider. */
-  private SqlLatticeStatisticProvider() {}
+  static final Factory CACHED_FACTORY = lattice -> {
+    LatticeStatisticProvider provider = FACTORY.apply(lattice);
+    return new CachingLatticeStatisticProvider(lattice, provider);
+  };
 
-  @Override public int cardinality(Lattice lattice, Lattice.Column column) {
+  private final Lattice lattice;
+
+  /** Creates a SqlLatticeStatisticProvider. */
+  private SqlLatticeStatisticProvider(Lattice lattice) {
+    this.lattice = Objects.requireNonNull(lattice);
+  }
+
+  public double cardinality(List<Lattice.Column> columns) {
+    final List<Double> counts = new ArrayList<>();
+    for (Lattice.Column column : columns) {
+      counts.add(cardinality(lattice, column));
+    }
+    return (int) Lattice.getRowCount(lattice.getFactRowCount(), counts);
+  }
+
+  private double cardinality(Lattice lattice, Lattice.Column column) {
     final String sql = lattice.countSql(ImmutableBitSet.of(column.ordinal));
     final Table table =
         new MaterializationService.DefaultTableFactory()
-            .createTable(lattice.rootSchema, sql, ImmutableList.<String>of());
+            .createTable(lattice.rootSchema, sql, ImmutableList.of());
     final Object[] values =
         Iterables.getOnlyElement(((ScannableTable) table).scan(null));
-    return ((Number) values[0]).intValue();
+    return ((Number) values[0]).doubleValue();
   }
 }
 

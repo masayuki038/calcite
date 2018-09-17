@@ -75,7 +75,7 @@ import static org.apache.calcite.sql.fun.SqlStdOperatorTable.UPPER;
  */
 public class RexToLixTranslator {
   public static final Map<Method, SqlOperator> JAVA_TO_SQL_METHOD_MAP =
-      Util.<Method, SqlOperator>mapOf(
+      Util.mapOf(
           findMethod(String.class, "toUpperCase"), UPPER,
           findMethod(
               SqlFunctions.class, "substring", String.class, Integer.TYPE,
@@ -109,7 +109,7 @@ public class RexToLixTranslator {
   protected RexToLixTranslator(RexProgram program, JavaTypeFactory typeFactory,
       Expression root, InputGetter inputGetter, BlockBuilder list) {
     this(program, typeFactory, root, inputGetter, list,
-        Collections.<RexNode, Boolean>emptyMap(),
+        Collections.emptyMap(),
         new RexBuilder(typeFactory));
   }
 
@@ -541,8 +541,7 @@ public class RexToLixTranslator {
           }
           // If this is a widening cast, no need to pad.
           if (SqlTypeUtil.comparePrecision(sourcePrecision, targetPrecision)
-              >= 0
-              && targetPrecision != RelDataType.PRECISION_NOT_SPECIFIED) {
+              >= 0) {
             pad = false;
           }
           // fall through
@@ -593,7 +592,46 @@ public class RexToLixTranslator {
         convert = RexImpTable.multiplyDivide(convert, multiplier, divider);
       }
     }
-    return convert;
+    return scaleIntervalToNumber(sourceType, targetType, convert);
+  }
+
+  /** Adapts an expression with "normal" result to one that adheres to
+   * this particular policy. Wraps the result expression into a new
+   * parameter if need be.
+   *
+   * @param input Expression
+   * @param nullAs If false, if expression is definitely not null at
+   *   runtime. Therefore we can optimize. For example, we can cast to int
+   *   using x.intValue().
+   * @return Translated expression
+   */
+  public Expression handleNull(Expression input, RexImpTable.NullAs nullAs) {
+    final Expression nullHandled = nullAs.handle(input);
+
+    // If we get ConstantExpression, just return it (i.e. primitive false)
+    if (nullHandled instanceof ConstantExpression) {
+      return nullHandled;
+    }
+
+    // if nullHandled expression is the same as "input",
+    // then we can just reuse it
+    if (nullHandled == input) {
+      return input;
+    }
+
+    // If nullHandled is different, then it might be unsafe to compute
+    // early (i.e. unbox of null value should not happen _before_ ternary).
+    // Thus we wrap it into brand-new ParameterExpression,
+    // and we are guaranteed that ParameterExpression will not be shared
+    String unboxVarName = "v_unboxed";
+    if (input instanceof ParameterExpression) {
+      unboxVarName = ((ParameterExpression) input).name + "_unboxed";
+    }
+    ParameterExpression unboxed = Expressions.parameter(nullHandled.getType(),
+        list.newName(unboxVarName));
+    list.add(Expressions.declare(Modifier.FINAL, unboxed, nullHandled));
+
+    return unboxed;
   }
 
   /** Translates an expression that is not in the cache.
@@ -621,32 +659,7 @@ public class RexToLixTranslator {
         // unboxing via nullAs.handle below.
         return input;
       }
-      Expression nullHandled = nullAs.handle(input);
-
-      // If we get ConstantExpression, just return it (i.e. primitive false)
-      if (nullHandled instanceof ConstantExpression) {
-        return nullHandled;
-      }
-
-      // if nullHandled expression is the same as "input",
-      // then we can just reuse it
-      if (nullHandled == input) {
-        return input;
-      }
-
-      // If nullHandled is different, then it might be unsafe to compute
-      // early (i.e. unbox of null value should not happen _before_ ternary).
-      // Thus we wrap it into brand-new ParameterExpression,
-      // and we are guaranteed that ParameterExpression will not be shared
-      String unboxVarName = "v_unboxed";
-      if (input instanceof ParameterExpression) {
-        unboxVarName = ((ParameterExpression) input).name + "_unboxed";
-      }
-      ParameterExpression unboxed = Expressions.parameter(nullHandled.getType(),
-          list.newName(unboxVarName));
-      list.add(Expressions.declare(Modifier.FINAL, unboxed, nullHandled));
-
-      return unboxed;
+      return handleNull(input, nullAs);
     case LOCAL_REF:
       return translate(
           deref(expr),
@@ -765,6 +778,8 @@ public class RexToLixTranslator {
     case DECIMAL:
       final BigDecimal bd = literal.getValueAs(BigDecimal.class);
       if (javaClass == float.class) {
+        return Expressions.constant(bd, javaClass);
+      } else if (javaClass == double.class) {
         return Expressions.constant(bd, javaClass);
       }
       assert javaClass == BigDecimal.class;
@@ -1208,7 +1223,7 @@ public class RexToLixTranslator {
       return this;
     }
     return new RexToLixTranslator(program, typeFactory, root, inputGetter,
-        block, ImmutableMap.<RexNode, Boolean>of(), builder, this, correlates);
+        block, ImmutableMap.of(), builder, this, correlates);
   }
 
   public RexToLixTranslator setCorrelates(
@@ -1217,7 +1232,7 @@ public class RexToLixTranslator {
       return this;
     }
     return new RexToLixTranslator(program, typeFactory, root, inputGetter, list,
-        Collections.<RexNode, Boolean>emptyMap(), builder, this, correlates);
+        Collections.emptyMap(), builder, this, correlates);
   }
 
   public RelDataType nullifyType(RelDataType type, boolean nullable) {
@@ -1240,6 +1255,36 @@ public class RexToLixTranslator {
 
   public Expression getRoot() {
     return root;
+  }
+
+  private static Expression scaleIntervalToNumber(
+      RelDataType sourceType,
+      RelDataType targetType,
+      Expression operand) {
+    switch (targetType.getSqlTypeName().getFamily()) {
+    case NUMERIC:
+      switch (sourceType.getSqlTypeName()) {
+      case INTERVAL_YEAR:
+      case INTERVAL_YEAR_MONTH:
+      case INTERVAL_MONTH:
+      case INTERVAL_DAY:
+      case INTERVAL_DAY_HOUR:
+      case INTERVAL_DAY_MINUTE:
+      case INTERVAL_DAY_SECOND:
+      case INTERVAL_HOUR:
+      case INTERVAL_HOUR_MINUTE:
+      case INTERVAL_HOUR_SECOND:
+      case INTERVAL_MINUTE:
+      case INTERVAL_MINUTE_SECOND:
+      case INTERVAL_SECOND:
+        // Scale to the given field.
+        final BigDecimal multiplier = BigDecimal.ONE;
+        final BigDecimal divider =
+            sourceType.getSqlTypeName().getEndUnit().multiplier;
+        return RexImpTable.multiplyDivide(operand, multiplier, divider);
+      }
+    }
+    return operand;
   }
 
   /** Translates a field of an input to an expression. */

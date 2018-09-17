@@ -25,6 +25,7 @@ import org.apache.calcite.rel.type.RelDataTypeImpl;
 import org.apache.calcite.rel.type.RelProtoDataType;
 import org.apache.calcite.rex.RexBuilder;
 import org.apache.calcite.rex.RexNode;
+import org.apache.calcite.schema.ColumnStrategy;
 import org.apache.calcite.schema.ExtensibleTable;
 import org.apache.calcite.schema.ModifiableView;
 import org.apache.calcite.schema.Path;
@@ -38,10 +39,10 @@ import org.apache.calcite.util.ImmutableIntList;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.Maps;
 
 import java.lang.reflect.Type;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -92,7 +93,7 @@ public class ModifiableViewTable extends ViewTable
     } else if (aClass.isInstance(table)) {
       return aClass.cast(table);
     }
-    return null;
+    return super.unwrap(aClass);
   }
 
   /**
@@ -185,16 +186,38 @@ public class ModifiableViewTable extends ViewTable
 
     private ModifiableViewTableInitializerExpressionFactory() {
       super();
-      final Map<Integer, RexNode> projectMap = Maps.newHashMap();
+      final Map<Integer, RexNode> projectMap = new HashMap<>();
       final List<RexNode> filters = new ArrayList<>();
       RelOptUtil.inferViewPredicates(projectMap, filters, constraint);
       assert filters.isEmpty();
       this.projectMap = ImmutableMap.copyOf(projectMap);
     }
 
-    @Override public boolean isGeneratedAlways(RelOptTable table, int iColumn) {
-      assert table.unwrap(ModifiableViewTable.class) != null;
-      return false;
+    @Override public ColumnStrategy generationStrategy(RelOptTable table,
+        int iColumn) {
+      final ModifiableViewTable viewTable =
+          table.unwrap(ModifiableViewTable.class);
+      assert iColumn < viewTable.columnMapping.size();
+
+      // Use the view constraint to generate the default value if the column is
+      // constrained.
+      final int mappedOrdinal = viewTable.columnMapping.get(iColumn);
+      final RexNode viewConstraint = projectMap.get(mappedOrdinal);
+      if (viewConstraint != null) {
+        return ColumnStrategy.DEFAULT;
+      }
+
+      // Otherwise use the default value of the underlying table.
+      final Table schemaTable = viewTable.getTable();
+      if (schemaTable instanceof Wrapper) {
+        final InitializerExpressionFactory initializerExpressionFactory =
+            ((Wrapper) schemaTable).unwrap(InitializerExpressionFactory.class);
+        if (initializerExpressionFactory != null) {
+          return initializerExpressionFactory.generationStrategy(table,
+              iColumn);
+        }
+      }
+      return super.generationStrategy(table, iColumn);
     }
 
     @Override public RexNode newColumnDefaultValue(RelOptTable table,
@@ -214,7 +237,7 @@ public class ModifiableViewTable extends ViewTable
       }
 
       // Otherwise use the default value of the underlying table.
-      final Table schemaTable = viewTable.unwrap(Table.class);
+      final Table schemaTable = viewTable.getTable();
       if (schemaTable instanceof Wrapper) {
         final InitializerExpressionFactory initializerExpressionFactory =
             ((Wrapper) schemaTable).unwrap(InitializerExpressionFactory.class);

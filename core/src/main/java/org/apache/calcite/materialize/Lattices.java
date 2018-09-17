@@ -23,18 +23,16 @@ public class Lattices {
   private Lattices() {}
 
   /** Statistics provider that uses SQL. */
-  public static final LatticeStatisticProvider SQL =
-      SqlLatticeStatisticProvider.INSTANCE;
+  public static final LatticeStatisticProvider.Factory SQL =
+      SqlLatticeStatisticProvider.FACTORY;
 
   /** Statistics provider that uses SQL then stores the results in a cache. */
-  public static final LatticeStatisticProvider CACHED_SQL =
-      cache(SqlLatticeStatisticProvider.INSTANCE);
+  public static final LatticeStatisticProvider.Factory CACHED_SQL =
+      SqlLatticeStatisticProvider.CACHED_FACTORY;
 
-  /** Wraps a statistic provider in a cache. */
-  public static LatticeStatisticProvider cache(
-      LatticeStatisticProvider provider) {
-    return new CachingLatticeStatisticProvider(provider);
-  }
+  /** Statistics provider that uses a profiler. */
+  public static final LatticeStatisticProvider.Factory PROFILER =
+      ProfilerLatticeStatisticProvider.FACTORY;
 }
 
 // End Lattices.java

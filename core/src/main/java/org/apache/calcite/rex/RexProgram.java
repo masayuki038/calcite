@@ -34,7 +34,7 @@ import org.apache.calcite.util.Pair;
 import org.apache.calcite.util.Permutation;
 
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.Lists;
+import com.google.common.collect.Ordering;
 
 import java.io.PrintWriter;
 import java.io.StringWriter;
@@ -52,7 +52,7 @@ import java.util.Set;
  *
  * <p>Programs are immutable. It may help to use a {@link RexProgramBuilder},
  * which has the same relationship to {@link RexProgram} as {@link StringBuffer}
- * does has to {@link String}.
+ * has to {@link String}.
  *
  * <p>A program can contain aggregate functions. If it does, the arguments to
  * each aggregate function must be an {@link RexInputRef}.
@@ -513,7 +513,7 @@ public class RexProgram {
    * <p>Neither list is null.
    * The filters are evaluated first. */
   public Pair<ImmutableList<RexNode>, ImmutableList<RexNode>> split() {
-    final List<RexNode> filters = Lists.newArrayList();
+    final List<RexNode> filters = new ArrayList<>();
     if (condition != null) {
       RelOptUtil.decomposeConjunction(expandLocalRef(condition), filters);
     }
@@ -527,10 +527,10 @@ public class RexProgram {
   /**
    * Given a list of collations which hold for the input to this program,
    * returns a list of collations which hold for its output. The result is
-   * mutable.
+   * mutable and sorted.
    */
   public List<RelCollation> getCollations(List<RelCollation> inputCollations) {
-    List<RelCollation> outputCollations = new ArrayList<>(1);
+    final List<RelCollation> outputCollations = new ArrayList<>();
     deduceCollations(
         outputCollations,
         inputRowType.getFieldCount(), projects,
@@ -540,7 +540,7 @@ public class RexProgram {
 
   /**
    * Given a list of expressions and a description of which are ordered,
-   * computes a list of collations. The result is mutable.
+   * populates a list of collations, sorted in natural order.
    */
   public static void deduceCollations(
       List<RelCollation> outputCollations,
@@ -573,6 +573,7 @@ public class RexProgram {
       // to the output.
       outputCollations.add(RelCollations.of(fieldCollations));
     }
+    outputCollations.sort(Ordering.natural());
   }
 
   /**

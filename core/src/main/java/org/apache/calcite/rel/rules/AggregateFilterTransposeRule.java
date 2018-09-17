@@ -23,6 +23,7 @@ import org.apache.calcite.plan.RelOptUtil;
 import org.apache.calcite.plan.SubstitutionVisitor;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.core.Aggregate;
+import org.apache.calcite.rel.core.Aggregate.Group;
 import org.apache.calcite.rel.core.AggregateCall;
 import org.apache.calcite.rel.core.Filter;
 import org.apache.calcite.rel.core.RelFactories;
@@ -34,10 +35,9 @@ import org.apache.calcite.tools.RelBuilderFactory;
 import org.apache.calcite.util.ImmutableBitSet;
 import org.apache.calcite.util.mapping.Mappings;
 
-import com.google.common.base.Function;
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.Lists;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -96,18 +96,14 @@ public class AggregateFilterTransposeRule extends RelOptRule {
         aggregate.copy(aggregate.getTraitSet(), input,
                 false, newGroupSet, null, aggregate.getAggCallList());
     final Mappings.TargetMapping mapping = Mappings.target(
-        new Function<Integer, Integer>() {
-          public Integer apply(Integer a0) {
-            return newGroupSet.indexOf(a0);
-          }
-        },
+        newGroupSet::indexOf,
         input.getRowType().getFieldCount(),
         newGroupSet.cardinality());
     final RexNode newCondition =
         RexUtil.apply(mapping, filter.getCondition());
     final Filter newFilter = filter.copy(filter.getTraitSet(),
         newAggregate, newCondition);
-    if (allColumnsInAggregate && aggregate.getGroupSets().size() == 1) {
+    if (allColumnsInAggregate && aggregate.getGroupType() == Group.SIMPLE) {
       // Everything needed by the filter is returned by the aggregate.
       assert newGroupSet.equals(aggregate.getGroupSet());
       call.transformTo(newFilter);
@@ -120,7 +116,7 @@ public class AggregateFilterTransposeRule extends RelOptRule {
         topGroupSet.set(newGroupSet.indexOf(c));
       }
       ImmutableList<ImmutableBitSet> newGroupingSets = null;
-      if (aggregate.groupSets.size() > 1) {
+      if (aggregate.getGroupType() != Group.SIMPLE) {
         ImmutableList.Builder<ImmutableBitSet> newGroupingSetsBuilder =
                 ImmutableList.builder();
         for (ImmutableBitSet groupingSet : aggregate.getGroupSets()) {
@@ -133,7 +129,7 @@ public class AggregateFilterTransposeRule extends RelOptRule {
         }
         newGroupingSets = newGroupingSetsBuilder.build();
       }
-      final List<AggregateCall> topAggCallList = Lists.newArrayList();
+      final List<AggregateCall> topAggCallList = new ArrayList<>();
       int i = newGroupSet.cardinality();
       for (AggregateCall aggregateCall : aggregate.getAggCallList()) {
         final SqlAggFunction rollup =

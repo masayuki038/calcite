@@ -35,6 +35,7 @@ presenting the data as tables within a schema.
   and
   <a href="{{ site.apiRoot }}/org/apache/calcite/adapter/elasticsearch5/package-summary.html">calcite-elasticsearch5</a>)
 * [File adapter](file_adapter.html) (<a href="{{ site.apiRoot }}/org/apache/calcite/adapter/file/package-summary.html">calcite-file</a>)
+* [Geode adapter](geode_adapter.html) (<a href="{{ site.apiRoot }}/org/apache/calcite/adapter/geode/package-summary.html">calcite-geode</a>)
 * JDBC adapter (part of <a href="{{ site.apiRoot }}/org/apache/calcite/adapter/jdbc/package-summary.html">calcite-core</a>)
 * MongoDB adapter (<a href="{{ site.apiRoot }}/org/apache/calcite/adapter/mongodb/package-summary.html">calcite-mongodb</a>)
 * [OS adapter](os_adapter.html) (<a href="{{ site.apiRoot }}/org/apache/calcite/adapter/os/package-summary.html">calcite-os</a>)
@@ -88,10 +89,10 @@ as implemented by Avatica's
 | <a href="{{ site.apiRoot }}/org/apache/calcite/config/CalciteConnectionProperty.html#DEFAULT_NULL_COLLATION">defaultNullCollation</a> | How NULL values should be sorted if neither NULLS FIRST nor NULLS LAST are specified in a query. The default, HIGH, sorts NULL values the same as Oracle.
 | <a href="{{ site.apiRoot }}/org/apache/calcite/config/CalciteConnectionProperty.html#DRUID_FETCH">druidFetch</a> | How many rows the Druid adapter should fetch at a time when executing SELECT queries.
 | <a href="{{ site.apiRoot }}/org/apache/calcite/config/CalciteConnectionProperty.html#FORCE_DECORRELATE">forceDecorrelate</a> | Whether the planner should try de-correlating as much as possible. Default true.
-| <a href="{{ site.apiRoot }}/org/apache/calcite/config/CalciteConnectionProperty.html#FUN">fun</a> | Collection of built-in functions and operators. Valid values: "standard" (the default), "oracle".
+| <a href="{{ site.apiRoot }}/org/apache/calcite/config/CalciteConnectionProperty.html#FUN">fun</a> | Collection of built-in functions and operators. Valid values are "standard" (the default), "oracle", "spatial", and may be combined using commas, for example "oracle,spatial".
 | <a href="{{ site.apiRoot }}/org/apache/calcite/config/CalciteConnectionProperty.html#LEX">lex</a> | Lexical policy. Values are ORACLE (default), MYSQL, MYSQL_ANSI, SQL_SERVER, JAVA.
 | <a href="{{ site.apiRoot }}/org/apache/calcite/config/CalciteConnectionProperty.html#MATERIALIZATIONS_ENABLED">materializationsEnabled</a> | Whether Calcite should use materializations. Default false.
-| <a href="{{ site.apiRoot }}/org/apache/calcite/config/CalciteConnectionProperty.html#MODEL">model</a> | URI of the JSON model file.
+| <a href="{{ site.apiRoot }}/org/apache/calcite/config/CalciteConnectionProperty.html#MODEL">model</a> | URI of the JSON/YAML model file or inline like `inline:{...}` for JSON and `inline:...` for YAML.
 | <a href="{{ site.apiRoot }}/org/apache/calcite/config/CalciteConnectionProperty.html#PARSER_FACTORY">parserFactory</a> | Parser factory. The name of a class that implements [<tt>interface SqlParserImplFactory</tt>]({{ site.apiRoot }}/org/apache/calcite/sql/parser/SqlParserImplFactory.html) and has a public default constructor or an `INSTANCE` constant.
 | <a href="{{ site.apiRoot }}/org/apache/calcite/config/CalciteConnectionProperty.html#QUOTING">quoting</a> | How identifiers are quoted. Values are DOUBLE_QUOTE, BACK_QUOTE, BRACKET. If not specified, value from `lex` is used.
 | <a href="{{ site.apiRoot }}/org/apache/calcite/config/CalciteConnectionProperty.html#QUOTED_CASING">quotedCasing</a> | How identifiers are stored if they are quoted. Values are UNCHANGED, TO_UPPER, TO_LOWER. If not specified, value from `lex` is used.
@@ -136,6 +137,82 @@ makes a connection to the Cassandra adapter, equivalent to writing the following
 {% endhighlight %}
 
 Note how each key in the `operand` section appears with a `schema.` prefix in the connect string.
+
+## Server
+
+Calcite's core module (`calcite-core`) supports SQL queries (`SELECT`) and DML
+operations  (`INSERT`, `UPDATE`, `DELETE`, `MERGE`)
+but does not support DDL operations such as `CREATE SCHEMA` or `CREATE TABLE`.
+As we shall see, DDL complicates the state model of the repository and makes
+the parser more difficult to extend, so we left DDL out of core.
+
+The server module (`calcite-server`) adds DDL support to Calcite.
+It extends the SQL parser,
+[using the same mechanism used by sub-projects](#extending-the-parser),
+adding some DDL commands:
+
+* `CREATE` and `DROP SCHEMA`
+* `CREATE` and `DROP FOREIGN SCHEMA`
+* `CREATE` and `DROP TABLE` (including `CREATE TABLE ... AS SELECT`)
+* `CREATE` and `DROP MATERIALIZED VIEW`
+* `CREATE` and `DROP VIEW`
+
+Commands are described in the [SQL reference](reference.html#ddl-extensions).
+
+To enable, include `calcite-server.jar` in your class path, and add
+`parserFactory=org.apache.calcite.sql.parser.ddl.SqlDdlParserImpl#FACTORY`
+to the JDBC connect string (see connect string property
+[parserFactory]({{ site.apiRoot }}/org/apache/calcite/config/CalciteConnectionProperty.html#PARSER_FACTORY)).
+Here is an example using the `sqlline` shell.
+
+{% highlight sql %}
+$ ./sqlline
+sqlline version 1.3.0
+> !connect jdbc:calcite:parserFactory=org.apache.calcite.sql.parser.ddl.SqlDdlParserImpl#FACTORY sa ""
+> CREATE TABLE t (i INTEGER, j VARCHAR(10));
+No rows affected (0.293 seconds)
+> INSERT INTO t VALUES (1, 'a'), (2, 'bc');
+2 rows affected (0.873 seconds)
+> CREATE VIEW v AS SELECT * FROM t WHERE i > 1;
+No rows affected (0.072 seconds)
+> SELECT count(*) FROM v;
++---------------------+
+|       EXPR$0        |
++---------------------+
+| 1                   |
++---------------------+
+1 row selected (0.148 seconds)
+> !quit
+{% endhighlight %}
+
+The `calcite-server` module is optional.
+One of its goals is to showcase Calcite's capabilities
+(for example materialized views, foreign tables and generated columns) using
+concise examples that you can try from the SQL command line.
+All of the capabilities used by `calcite-server` are available via APIs in
+`calcite-core`.
+
+If you are the author of a sub-project, it is unlikely that your syntax
+extensions match those in `calcite-server`, so we recommend that you add your
+SQL syntax extensions by [extending the core parser](#extending-the-parser);
+if you want DDL commands, you may be able to copy-paste from `calcite-server`
+into your project.
+
+At present, the repository is not persisted. As you execute DDL commands, you
+are modifying an in-memory repository by adding and removing objects
+reachable from a root
+[<tt>Schema</tt>]({{ site.apiRoot }}/org/apache/calcite/schema/Schema.html).
+All commands within the same SQL session will see those objects.
+You can create the same objects in a future session by executing the same
+script of SQL commands.
+
+Calcite could also act as a data virtualization or federation server:
+Calcite manages data in multiple foreign schemas, but to a client the data
+all seems to be in the same place. Calcite chooses where processing should
+occur, and whether to create copies of data for efficiency.
+The `calcite-server` module is a step towards that goal; an
+industry-strength solution would require further on packaging (to make Calcite
+runnable as a service), repository persistence, authorization and security.
 
 ## Extensibility
 
@@ -289,7 +366,7 @@ compatible with future changes to the grammar. Making a copy of the grammar file
 quite frequently.
 
 Fortunately, `Parser.jj` is actually an
-[Apache FreeMarker](http://freemarker.apache.org/)
+[Apache FreeMarker](https://freemarker.apache.org/)
 template that contains variables that can be substituted.
 The parser in `calcite-core` instantiates the template with default values of
 the variables, typically empty, but you can override.

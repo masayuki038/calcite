@@ -20,6 +20,7 @@ import org.apache.calcite.plan.RelOptRule;
 import org.apache.calcite.plan.RelOptRuleCall;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.core.Aggregate;
+import org.apache.calcite.rel.core.Aggregate.Group;
 import org.apache.calcite.rel.core.AggregateCall;
 import org.apache.calcite.rel.core.Project;
 import org.apache.calcite.rel.core.RelFactories;
@@ -30,8 +31,8 @@ import org.apache.calcite.tools.RelBuilderFactory;
 import org.apache.calcite.util.ImmutableBitSet;
 
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.Lists;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -72,7 +73,7 @@ public class AggregateProjectMergeRule extends RelOptRule {
 
   public static RelNode apply(RelOptRuleCall call, Aggregate aggregate,
       Project project) {
-    final List<Integer> newKeys = Lists.newArrayList();
+    final List<Integer> newKeys = new ArrayList<>();
     final Map<Integer, Integer> map = new HashMap<>();
     for (int key : aggregate.getGroupSet()) {
       final RexNode rex = project.getProjects().get(key);
@@ -88,7 +89,7 @@ public class AggregateProjectMergeRule extends RelOptRule {
 
     final ImmutableBitSet newGroupSet = aggregate.getGroupSet().permute(map);
     ImmutableList<ImmutableBitSet> newGroupingSets = null;
-    if (aggregate.getGroupSets().size() > 1) {
+    if (aggregate.getGroupType() != Group.SIMPLE) {
       newGroupingSets =
           ImmutableBitSet.ORDERING.immutableSortedCopy(
               ImmutableBitSet.permute(aggregate.getGroupSets(), map));
@@ -130,7 +131,7 @@ public class AggregateProjectMergeRule extends RelOptRule {
     final RelBuilder relBuilder = call.builder();
     relBuilder.push(newAggregate);
     if (!newKeys.equals(newGroupSet.asList())) {
-      final List<Integer> posList = Lists.newArrayList();
+      final List<Integer> posList = new ArrayList<>();
       for (int newKey : newKeys) {
         posList.add(newGroupSet.indexOf(newKey));
       }

@@ -18,7 +18,6 @@ package org.apache.calcite.rel.metadata;
 
 import org.apache.calcite.linq4j.Linq4j;
 import org.apache.calcite.linq4j.Ord;
-import org.apache.calcite.linq4j.function.Predicate1;
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelOptPredicateList;
 import org.apache.calcite.plan.RelOptUtil;
@@ -58,11 +57,9 @@ import org.apache.calcite.util.mapping.Mapping;
 import org.apache.calcite.util.mapping.MappingType;
 import org.apache.calcite.util.mapping.Mappings;
 
-import com.google.common.base.Function;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
-import com.google.common.collect.Maps;
 
 import java.util.ArrayList;
 import java.util.BitSet;
@@ -73,8 +70,10 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.Objects;
 import java.util.Set;
 import java.util.SortedMap;
+import java.util.TreeMap;
 
 /**
  * Utility to infer Predicates that are applicable above a RelNode.
@@ -186,28 +185,13 @@ public class RelMdPredicates
         input.getRowType().getFieldCount(),
         project.getRowType().getFieldCount());
 
-    for (Ord<RexNode> o : Ord.zip(project.getProjects())) {
-      if (o.e instanceof RexInputRef) {
-        int sIdx = ((RexInputRef) o.e).getIndex();
-        m.set(sIdx, o.i);
-        columnsMappedBuilder.set(sIdx);
-      }
-    }
-
-    // Go over childPullUpPredicates. If a predicate only contains columns in
-    // 'columnsMapped' construct a new predicate based on mapping.
-    final ImmutableBitSet columnsMapped = columnsMappedBuilder.build();
-    for (RexNode r : inputInfo.pulledUpPredicates) {
-      RexNode r2 = projectPredicate(rexBuilder, input, r, columnsMapped);
-      if (!r2.isAlwaysTrue()) {
-        r2 = r2.accept(new RexPermuteInputsShuttle(m, input));
-        projectPullUpPredicates.add(r2);
-      }
-    }
-
-    // Project can also generate constants. We need to include them.
     for (Ord<RexNode> expr : Ord.zip(project.getProjects())) {
-      if (RexLiteral.isNullLiteral(expr.e)) {
+      if (expr.e instanceof RexInputRef) {
+        int sIdx = ((RexInputRef) expr.e).getIndex();
+        m.set(sIdx, expr.i);
+        columnsMappedBuilder.set(sIdx);
+      // Project can also generate constants. We need to include them.
+      } else if (RexLiteral.isNullLiteral(expr.e)) {
         projectPullUpPredicates.add(
             rexBuilder.makeCall(SqlStdOperatorTable.IS_NULL,
                 rexBuilder.makeInputRef(project, expr.i)));
@@ -219,6 +203,17 @@ public class RelMdPredicates
             ? SqlStdOperatorTable.IS_NOT_DISTINCT_FROM
             : SqlStdOperatorTable.EQUALS;
         projectPullUpPredicates.add(rexBuilder.makeCall(op, args));
+      }
+    }
+
+    // Go over childPullUpPredicates. If a predicate only contains columns in
+    // 'columnsMapped' construct a new predicate based on mapping.
+    final ImmutableBitSet columnsMapped = columnsMappedBuilder.build();
+    for (RexNode r : inputInfo.pulledUpPredicates) {
+      RexNode r2 = projectPredicate(rexBuilder, input, r, columnsMapped);
+      if (!r2.isAlwaysTrue()) {
+        r2 = r2.accept(new RexPermuteInputsShuttle(m, input));
+        projectPullUpPredicates.add(r2);
       }
     }
     return RelOptPredicateList.of(rexBuilder, projectPullUpPredicates);
@@ -290,40 +285,31 @@ public class RelMdPredicates
                     RelOptUtil.conjunctions(filter.getCondition()))));
   }
 
-  /** Infers predicates for a {@link org.apache.calcite.rel.core.SemiJoin}. */
-  public RelOptPredicateList getPredicates(SemiJoin semiJoin,
-      RelMetadataQuery mq) {
-    RexBuilder rB = semiJoin.getCluster().getRexBuilder();
-    final RelNode left = semiJoin.getInput(0);
-    final RelNode right = semiJoin.getInput(1);
-
-    final RelOptPredicateList leftInfo = mq.getPulledUpPredicates(left);
-    final RelOptPredicateList rightInfo = mq.getPulledUpPredicates(right);
-
-    JoinConditionBasedPredicateInference jI =
-        new JoinConditionBasedPredicateInference(semiJoin,
-            RexUtil.composeConjunction(rB, leftInfo.pulledUpPredicates, false),
-            RexUtil.composeConjunction(rB, rightInfo.pulledUpPredicates, false));
-
-    return jI.inferPredicates(false);
-  }
-
-  /** Infers predicates for a {@link org.apache.calcite.rel.core.Join}. */
+  /**
+   * Infers predicates for a {@link org.apache.calcite.rel.core.Join} (including
+   * {@link org.apache.calcite.rel.core.SemiJoin}).
+   */
   public RelOptPredicateList getPredicates(Join join, RelMetadataQuery mq) {
-    RexBuilder rB = join.getCluster().getRexBuilder();
-    RelNode left = join.getInput(0);
-    RelNode right = join.getInput(1);
+    RelOptCluster cluster = join.getCluster();
+    RexBuilder rexBuilder = cluster.getRexBuilder();
+    final RexExecutor executor =
+        Util.first(cluster.getPlanner().getExecutor(), RexUtil.EXECUTOR);
+    final RelNode left = join.getInput(0);
+    final RelNode right = join.getInput(1);
 
     final RelOptPredicateList leftInfo = mq.getPulledUpPredicates(left);
     final RelOptPredicateList rightInfo = mq.getPulledUpPredicates(right);
 
-    JoinConditionBasedPredicateInference jI =
-        new JoinConditionBasedPredicateInference(join,
-            RexUtil.composeConjunction(rB, leftInfo.pulledUpPredicates, false),
-            RexUtil.composeConjunction(rB, rightInfo.pulledUpPredicates,
-                false));
+    final RexSimplify simplifier =
+        new RexSimplify(rexBuilder, RelOptPredicateList.EMPTY, true, executor);
 
-    return jI.inferPredicates(false);
+    JoinConditionBasedPredicateInference joinInference =
+        new JoinConditionBasedPredicateInference(join,
+            RexUtil.composeConjunction(rexBuilder, leftInfo.pulledUpPredicates, false),
+            RexUtil.composeConjunction(rexBuilder, rightInfo.pulledUpPredicates, false),
+            simplifier);
+
+    return joinInference.inferPredicates(false);
   }
 
   /**
@@ -374,7 +360,7 @@ public class RelMdPredicates
    * Infers predicates for a Union.
    */
   public RelOptPredicateList getPredicates(Union union, RelMetadataQuery mq) {
-    RexBuilder rB = union.getCluster().getRexBuilder();
+    RexBuilder rexBuilder = union.getCluster().getRexBuilder();
 
     Map<String, RexNode> finalPreds = new HashMap<>();
     List<RexNode> finalResidualPreds = new ArrayList<>();
@@ -399,14 +385,14 @@ public class RelMdPredicates
         }
       }
       // Add new residual preds
-      finalResidualPreds.add(RexUtil.composeConjunction(rB, residualPreds, false));
+      finalResidualPreds.add(RexUtil.composeConjunction(rexBuilder, residualPreds, false));
       // Add those that are not part of the final set to residual
       for (Entry<String, RexNode> e : finalPreds.entrySet()) {
         if (!preds.containsKey(e.getKey())) {
           // This node was in previous union inputs, but it is not in this one
           for (int j = 0; j < i; j++) {
             finalResidualPreds.set(j,
-                RexUtil.composeConjunction(rB,
+                RexUtil.composeConjunction(rexBuilder,
                     Lists.newArrayList(finalResidualPreds.get(j), e.getValue()), false));
           }
         }
@@ -421,12 +407,12 @@ public class RelMdPredicates
         Util.first(cluster.getPlanner().getExecutor(), RexUtil.EXECUTOR);
     final RelOptPredicateList predicates = RelOptPredicateList.EMPTY;
     final RexSimplify simplify =
-        new RexSimplify(rB, predicates, true, executor);
+        new RexSimplify(rexBuilder, predicates, true, executor);
     RexNode disjPred = simplify.simplifyOrs(finalResidualPreds);
     if (!disjPred.isAlwaysTrue()) {
       preds.add(disjPred);
     }
-    return RelOptPredicateList.of(rB, preds);
+    return RelOptPredicateList.of(rexBuilder, preds);
   }
 
   /**
@@ -497,21 +483,23 @@ public class RelMdPredicates
     final ImmutableBitSet allFieldsBitSet;
     SortedMap<Integer, BitSet> equivalence;
     final Map<String, ImmutableBitSet> exprFields;
-    final Set<String> allExprsDigests;
+    final Set<String> allExprDigests;
     final Set<String> equalityPredicates;
     final RexNode leftChildPredicates;
     final RexNode rightChildPredicates;
+    final RexSimplify simplifier;
 
     JoinConditionBasedPredicateInference(Join joinRel,
-            RexNode lPreds, RexNode rPreds) {
-      this(joinRel, joinRel instanceof SemiJoin, lPreds, rPreds);
+            RexNode lPreds, RexNode rPreds, RexSimplify simplifier) {
+      this(joinRel, joinRel instanceof SemiJoin, lPreds, rPreds, simplifier);
     }
 
     private JoinConditionBasedPredicateInference(Join joinRel, boolean isSemiJoin,
-        RexNode lPreds, RexNode rPreds) {
+        RexNode lPreds, RexNode rPreds, RexSimplify simplifier) {
       super();
       this.joinRel = joinRel;
       this.isSemiJoin = isSemiJoin;
+      this.simplifier = simplifier;
       nFieldsLeft = joinRel.getLeft().getRowType().getFieldList().size();
       nFieldsRight = joinRel.getRight().getRowType().getFieldList().size();
       nSysFields = joinRel.getSystemFieldList().size();
@@ -522,8 +510,8 @@ public class RelMdPredicates
       allFieldsBitSet = ImmutableBitSet.range(0,
           nSysFields + nFieldsLeft + nFieldsRight);
 
-      exprFields = Maps.newHashMap();
-      allExprsDigests = new HashSet<>();
+      exprFields = new HashMap<>();
+      allExprDigests = new HashSet<>();
 
       if (lPreds == null) {
         leftChildPredicates = null;
@@ -533,9 +521,10 @@ public class RelMdPredicates
         leftChildPredicates = lPreds.accept(
             new RexPermuteInputsShuttle(leftMapping, joinRel.getInput(0)));
 
+        allExprDigests.add(leftChildPredicates.toString());
         for (RexNode r : RelOptUtil.conjunctions(leftChildPredicates)) {
           exprFields.put(r.toString(), RelOptUtil.InputFinder.bits(r));
-          allExprsDigests.add(r.toString());
+          allExprDigests.add(r.toString());
         }
       }
       if (rPreds == null) {
@@ -547,13 +536,14 @@ public class RelMdPredicates
         rightChildPredicates = rPreds.accept(
             new RexPermuteInputsShuttle(rightMapping, joinRel.getInput(1)));
 
+        allExprDigests.add(rightChildPredicates.toString());
         for (RexNode r : RelOptUtil.conjunctions(rightChildPredicates)) {
           exprFields.put(r.toString(), RelOptUtil.InputFinder.bits(r));
-          allExprsDigests.add(r.toString());
+          allExprDigests.add(r.toString());
         }
       }
 
-      equivalence = Maps.newTreeMap();
+      equivalence = new TreeMap<>();
       equalityPredicates = new HashSet<>();
       for (int i = 0; i < nSysFields + nFieldsLeft + nFieldsRight; i++) {
         equivalence.put(i, BitSets.of(i));
@@ -569,12 +559,7 @@ public class RelMdPredicates
 
       final EquivalenceFinder eF = new EquivalenceFinder();
       new ArrayList<>(
-          Lists.transform(exprs,
-              new Function<RexNode, Void>() {
-                public Void apply(RexNode input) {
-                  return input.accept(eF);
-                }
-              }));
+          Lists.transform(exprs, input -> input.accept(eF)));
 
       equivalence = BitSets.closure(equivalence);
     }
@@ -595,12 +580,12 @@ public class RelMdPredicates
     public RelOptPredicateList inferPredicates(
         boolean includeEqualityInference) {
       final List<RexNode> inferredPredicates = new ArrayList<>();
-      final Set<String> allExprsDigests = new HashSet<>(this.allExprsDigests);
+      final Set<String> allExprDigests = new HashSet<>(this.allExprDigests);
       final JoinRelType joinType = joinRel.getJoinType();
       switch (joinType) {
       case INNER:
       case LEFT:
-        infer(leftChildPredicates, allExprsDigests, inferredPredicates,
+        infer(leftChildPredicates, allExprDigests, inferredPredicates,
             includeEqualityInference,
             joinType == JoinRelType.LEFT ? rightFieldsBitSet
                 : allFieldsBitSet);
@@ -609,7 +594,7 @@ public class RelMdPredicates
       switch (joinType) {
       case INNER:
       case RIGHT:
-        infer(rightChildPredicates, allExprsDigests, inferredPredicates,
+        infer(rightChildPredicates, allExprDigests, inferredPredicates,
             includeEqualityInference,
             joinType == JoinRelType.RIGHT ? leftFieldsBitSet
                 : allFieldsBitSet);
@@ -678,7 +663,7 @@ public class RelMdPredicates
     }
 
     private void infer(RexNode predicates, Set<String> allExprsDigests,
-        List<RexNode> inferedPredicates, boolean includeEqualityInference,
+        List<RexNode> inferredPredicates, boolean includeEqualityInference,
         ImmutableBitSet inferringFields) {
       for (RexNode r : RelOptUtil.conjunctions(predicates)) {
         if (!includeEqualityInference
@@ -689,26 +674,35 @@ public class RelMdPredicates
           RexNode tr = r.accept(
               new RexPermuteInputsShuttle(m, joinRel.getInput(0),
                   joinRel.getInput(1)));
-          if (inferringFields.contains(RelOptUtil.InputFinder.bits(tr))
-              && !allExprsDigests.contains(tr.toString())
-              && !isAlwaysTrue(tr)) {
-            inferedPredicates.add(tr);
-            allExprsDigests.add(tr.toString());
+          // Filter predicates can be already simplified, so we should work with
+          // simplified RexNode versions as well. It also allows prevent of having
+          // some duplicates in in result pulledUpPredicates
+          RexNode simplifiedTarget =
+              simplifier.simplifyFilterPredicates(RelOptUtil.conjunctions(tr));
+          if (checkTarget(inferringFields, allExprsDigests, tr)
+              && checkTarget(inferringFields, allExprsDigests, simplifiedTarget)) {
+            inferredPredicates.add(simplifiedTarget);
+            allExprsDigests.add(simplifiedTarget.toString());
           }
         }
       }
     }
 
     Iterable<Mapping> mappings(final RexNode predicate) {
-      return new Iterable<Mapping>() {
-        public Iterator<Mapping> iterator() {
-          ImmutableBitSet fields = exprFields.get(predicate.toString());
-          if (fields.cardinality() == 0) {
-            return Collections.emptyIterator();
-          }
-          return new ExprsItr(fields);
+      return () -> {
+        ImmutableBitSet fields = exprFields.get(predicate.toString());
+        if (fields.cardinality() == 0) {
+          return Collections.emptyIterator();
         }
+        return new ExprsItr(fields);
       };
+    }
+
+    private boolean checkTarget(ImmutableBitSet inferringFields,
+        Set<String> allExprsDigests, RexNode tr) {
+      return inferringFields.contains(RelOptUtil.InputFinder.bits(tr))
+          && !allExprsDigests.contains(tr.toString())
+          && !isAlwaysTrue(tr);
     }
 
     private void equivalent(int p1, int p2) {
@@ -720,11 +714,7 @@ public class RelMdPredicates
     }
 
     RexNode compose(RexBuilder rexBuilder, Iterable<RexNode> exprs) {
-      exprs = Linq4j.asEnumerable(exprs).where(new Predicate1<RexNode>() {
-        public boolean apply(RexNode expr) {
-          return expr != null;
-        }
-      });
+      exprs = Linq4j.asEnumerable(exprs).where(Objects::nonNull);
       return RexUtil.composeConjunction(rexBuilder, exprs, false);
     }
 

@@ -22,6 +22,7 @@ import org.apache.calcite.plan.RelOptRule;
 import org.apache.calcite.plan.RelOptRuleCall;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.core.Aggregate;
+import org.apache.calcite.rel.core.Aggregate.Group;
 import org.apache.calcite.rel.core.AggregateCall;
 import org.apache.calcite.rel.core.JoinRelType;
 import org.apache.calcite.rel.core.RelFactories;
@@ -158,7 +159,7 @@ public final class AggregateExpandDistinctAggregatesRule extends RelOptRule {
     // arguments then we can use a more efficient form.
     if (nonDistinctAggCallCount == 0
         && argLists.size() == 1
-        && aggregate.getGroupSets().size() == 1) {
+        && aggregate.getGroupType() == Group.SIMPLE) {
       final Pair<List<Integer>, Integer> pair =
           Iterables.getOnlyElement(argLists);
       final RelBuilder relBuilder = call.builder();
@@ -307,7 +308,7 @@ public final class AggregateExpandDistinctAggregatesRule extends RelOptRule {
 
     // Add aggregate A (see the reference example above), the top aggregate
     // to handle the rest of the aggregation that the bottom aggregate hasn't handled
-    final List<AggregateCall> topAggregateCalls = Lists.newArrayList();
+    final List<AggregateCall> topAggregateCalls = new ArrayList<>();
     // Use the remapped arguments for the (non)distinct aggregate calls
     int nonDistinctAggCallProcessedSoFar = 0;
     for (AggregateCall aggCall : originalAggCalls) {
@@ -391,7 +392,11 @@ public final class AggregateExpandDistinctAggregatesRule extends RelOptRule {
     final List<AggregateCall> distinctAggCalls = new ArrayList<>();
     for (Pair<AggregateCall, String> aggCall : aggregate.getNamedAggCalls()) {
       if (!aggCall.left.isDistinct()) {
-        distinctAggCalls.add(aggCall.left.rename(aggCall.right));
+        AggregateCall newAggCall =
+            aggCall.left.adaptTo(aggregate.getInput(),
+                aggCall.left.getArgList(), aggCall.left.filterArg,
+                aggregate.getGroupCount(), fullGroupSet.cardinality());
+        distinctAggCalls.add(newAggCall.rename(aggCall.right));
       }
     }
 
@@ -702,7 +707,7 @@ public final class AggregateExpandDistinctAggregatesRule extends RelOptRule {
     // where {f0, f1, ...} are the GROUP BY fields.
     final List<RelDataTypeField> distinctFields =
         relBuilder.peek().getRowType().getFieldList();
-    final List<RexNode> conditions = Lists.newArrayList();
+    final List<RexNode> conditions = new ArrayList<>();
     for (i = 0; i < groupAndIndicatorCount; ++i) {
       // null values form its own group
       // use "is not distinct from" so that the join condition
@@ -840,7 +845,7 @@ public final class AggregateExpandDistinctAggregatesRule extends RelOptRule {
     relBuilder.push(
         aggregate.copy(aggregate.getTraitSet(), relBuilder.build(), false,
             ImmutableBitSet.range(projects.size()),
-            null, ImmutableList.<AggregateCall>of()));
+            null, ImmutableList.of()));
     return relBuilder;
   }
 }

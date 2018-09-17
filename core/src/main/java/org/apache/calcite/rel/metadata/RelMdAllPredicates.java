@@ -41,7 +41,6 @@ import org.apache.calcite.util.BuiltInMethod;
 import org.apache.calcite.util.ImmutableBitSet;
 import org.apache.calcite.util.Util;
 
-import com.google.common.base.Function;
 import com.google.common.collect.HashMultimap;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
@@ -172,11 +171,6 @@ public class RelMdAllPredicates
         // Bail out
         return null;
       }
-      // If it does not contain table references, nothing needs to be done
-      if (!RexUtil.containsTableInputRef(inputPreds.pulledUpPredicates)) {
-        newPreds = newPreds.union(rexBuilder, inputPreds);
-        continue;
-      }
       // Gather table references
       final Set<RelTableRef> tableRefs = mq.getTableReferences(input);
       if (input == join.getLeft()) {
@@ -200,14 +194,9 @@ public class RelMdAllPredicates
               RelTableRef.of(rightRef.getTable(), shift + rightRef.getEntityNumber()));
         }
         final List<RexNode> updatedPreds = Lists.newArrayList(
-            Iterables.transform(
-                inputPreds.pulledUpPredicates,
-                new Function<RexNode, RexNode>() {
-                  @Override public RexNode apply(RexNode e) {
-                    return RexUtil.swapTableReferences(rexBuilder, e, currentTablesMapping);
-                  }
-                }
-          ));
+            Iterables.transform(inputPreds.pulledUpPredicates,
+                e -> RexUtil.swapTableReferences(rexBuilder, e,
+                    currentTablesMapping)));
         newPreds = newPreds.union(rexBuilder,
             RelOptPredicateList.of(rexBuilder, updatedPreds));
       }
@@ -260,11 +249,6 @@ public class RelMdAllPredicates
         // Bail out
         return null;
       }
-      // If it does not contain table references, nothing needs to be done
-      if (!RexUtil.containsTableInputRef(inputPreds.pulledUpPredicates)) {
-        newPreds = newPreds.union(rexBuilder, inputPreds);
-        continue;
-      }
       // Gather table references
       final Set<RelTableRef> tableRefs = mq.getTableReferences(input);
       if (i == 0) {
@@ -293,14 +277,9 @@ public class RelMdAllPredicates
         }
         // Update preds
         final List<RexNode> updatedPreds = Lists.newArrayList(
-            Iterables.transform(
-                inputPreds.pulledUpPredicates,
-                new Function<RexNode, RexNode>() {
-                  @Override public RexNode apply(RexNode e) {
-                    return RexUtil.swapTableReferences(rexBuilder, e, currentTablesMapping);
-                  }
-                }
-          ));
+            Iterables.transform(inputPreds.pulledUpPredicates,
+                e -> RexUtil.swapTableReferences(rexBuilder, e,
+                    currentTablesMapping)));
         newPreds = newPreds.union(rexBuilder,
             RelOptPredicateList.of(rexBuilder, updatedPreds));
       }

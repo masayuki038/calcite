@@ -30,6 +30,7 @@ import org.apache.calcite.test.DiffTestCase;
 import org.apache.calcite.test.SqlValidatorTestCase;
 import org.apache.calcite.util.Bug;
 import org.apache.calcite.util.ConversionUtil;
+import org.apache.calcite.util.Sources;
 import org.apache.calcite.util.TestUtil;
 import org.apache.calcite.util.Util;
 
@@ -48,8 +49,7 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.PrintWriter;
-import java.net.URL;
-import java.net.URLDecoder;
+import java.nio.file.Paths;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
@@ -550,11 +550,7 @@ public class SqlParserTest {
   private static final String ANY = "(?s).*";
 
   private static final ThreadLocal<boolean[]> LINUXIFY =
-      new ThreadLocal<boolean[]>() {
-        @Override protected boolean[] initialValue() {
-          return new boolean[] {true};
-        }
-      };
+      ThreadLocal.withInitial(() -> new boolean[] {true});
 
   Quoting quoting = Quoting.DOUBLE_QUOTE;
   Casing unquotedCasing = Casing.TO_UPPER;
@@ -1016,6 +1012,46 @@ public class SqlParserTest {
         "SELECT `T`.`R`.`EXPR$1`.`EXPR$2`\n"
             + "FROM (SELECT (ROW((ROW(1, 2)), (ROW(3, 4, 5, 6)))) AS `R`\n"
             + "FROM `SALES`.`DEPTS`) AS `T`");
+
+    // Conformance DEFAULT and LENIENT support explicit row value constructor
+    conformance = SqlConformanceEnum.DEFAULT;
+    final String selectRow = "select ^row(t1a, t2a)^ from t1";
+    final String expected = "SELECT (ROW(`T1A`, `T2A`))\n"
+        + "FROM `T1`";
+    sql(selectRow).sansCarets().ok(expected);
+    conformance = SqlConformanceEnum.LENIENT;
+    sql(selectRow).sansCarets().ok(expected);
+
+    final String pattern = "ROW expression encountered in illegal context";
+    conformance = SqlConformanceEnum.MYSQL_5;
+    sql(selectRow).fails(pattern);
+    conformance = SqlConformanceEnum.ORACLE_12;
+    sql(selectRow).fails(pattern);
+    conformance = SqlConformanceEnum.STRICT_2003;
+    sql(selectRow).fails(pattern);
+    conformance = SqlConformanceEnum.SQL_SERVER_2008;
+    sql(selectRow).fails(pattern);
+
+    final String whereRow = "select 1 from t2 where ^row (x, y)^ < row (a, b)";
+    final String whereExpected = "SELECT 1\n"
+        + "FROM `T2`\n"
+        + "WHERE ((ROW(`X`, `Y`)) < (ROW(`A`, `B`)))";
+    conformance = SqlConformanceEnum.DEFAULT;
+    sql(whereRow).sansCarets().ok(whereExpected);
+    conformance = SqlConformanceEnum.SQL_SERVER_2008;
+    sql(whereRow).fails(pattern);
+
+    final String whereRow2 = "select 1 from t2 where ^(x, y)^ < (a, b)";
+    conformance = SqlConformanceEnum.DEFAULT;
+    sql(whereRow2).sansCarets().ok(whereExpected);
+    if (this instanceof SqlUnParserTest) {
+      // After this point, SqlUnparserTest has problems.
+      // We generate ROW in a dialect that does not allow ROW in all contexts.
+      // So bail out.
+      return;
+    }
+    conformance = SqlConformanceEnum.SQL_SERVER_2008;
+    sql(whereRow2).sansCarets().ok(whereExpected);
   }
 
   @Test public void testPeriod() {
@@ -1074,6 +1110,12 @@ public class SqlParserTest {
 
     check(
         "select * from t where x is distinct from (4,5,6)",
+        "SELECT *\n"
+            + "FROM `T`\n"
+            + "WHERE (`X` IS DISTINCT FROM (ROW(4, 5, 6)))");
+
+    check(
+        "select * from t where x is distinct from row (4,5,6)",
         "SELECT *\n"
             + "FROM `T`\n"
             + "WHERE (`X` IS DISTINCT FROM (ROW(4, 5, 6)))");
@@ -1442,18 +1484,18 @@ public class SqlParserTest {
   }
 
   @Test public void testFunctionDefaultArgument() {
-    checkExp("foo(1, DEFAULT, default, 'default', \"default\", 3)",
-        "`FOO`(1, DEFAULT, DEFAULT, 'default', `default`, 3)");
-    checkExp("foo(DEFAULT)",
-        "`FOO`(DEFAULT)");
-    checkExp("foo(x => 1, DEFAULT)",
-        "`FOO`(`X` => 1, DEFAULT)");
-    checkExp("foo(y => DEFAULT, x => 1)",
-        "`FOO`(`Y` => DEFAULT, `X` => 1)");
-    checkExp("foo(x => 1, y => DEFAULT)",
-        "`FOO`(`X` => 1, `Y` => DEFAULT)");
-    check("select sum(DISTINCT DEFAULT) from t group by x",
-        "SELECT SUM(DISTINCT DEFAULT)\n"
+    sql("foo(1, DEFAULT, default, 'default', \"default\", 3)").expression()
+        .ok("`FOO`(1, DEFAULT, DEFAULT, 'default', `default`, 3)");
+    sql("foo(DEFAULT)").expression()
+        .ok("`FOO`(DEFAULT)");
+    sql("foo(x => 1, DEFAULT)").expression()
+        .ok("`FOO`(`X` => 1, DEFAULT)");
+    sql("foo(y => DEFAULT, x => 1)").expression()
+        .ok("`FOO`(`Y` => DEFAULT, `X` => 1)");
+    sql("foo(x => 1, y => DEFAULT)").expression()
+        .ok("`FOO`(`X` => 1, `Y` => DEFAULT)");
+    sql("select sum(DISTINCT DEFAULT) from t group by x")
+        .ok("SELECT SUM(DISTINCT DEFAULT)\n"
             + "FROM `T`\n"
             + "GROUP BY `X`");
     checkExpFails("foo(x ^+^ DEFAULT)",
@@ -1462,6 +1504,31 @@ public class SqlParserTest {
         "(?s).*Encountered \"\\+ DEFAULT\" at .*");
     checkExpFails("foo(0, DEFAULT ^+^ y)",
         "(?s).*Encountered \"\\+\" at .*");
+  }
+
+  @Test public void testDefault() {
+    sql("select ^DEFAULT^ from emp")
+        .fails("(?s)Encountered \"DEFAULT\" at .*");
+    sql("select cast(empno ^+^ DEFAULT as double) from emp")
+        .fails("(?s)Encountered \"\\+ DEFAULT\" at .*");
+    sql("select empno ^+^ DEFAULT + deptno from emp")
+        .fails("(?s)Encountered \"\\+ DEFAULT\" at .*");
+    sql("select power(0, DEFAULT ^+^ empno) from emp")
+        .fails("(?s)Encountered \"\\+\" at .*");
+    sql("select * from emp join dept ^on^ DEFAULT")
+        .fails("(?s)Encountered \"on DEFAULT\" at .*");
+    sql("select * from emp where empno ^>^ DEFAULT or deptno < 10")
+        .fails("(?s)Encountered \"> DEFAULT\" at .*");
+    sql("select * from emp order by ^DEFAULT^ desc")
+        .fails("(?s)Encountered \"DEFAULT\" at .*");
+    final String expected = "INSERT INTO `DEPT` (`NAME`, `DEPTNO`)\n"
+        + "VALUES (ROW('a', DEFAULT))";
+    sql("insert into dept (name, deptno) values ('a', DEFAULT)")
+        .ok(expected);
+    sql("insert into dept (name, deptno) values ('a', 1 ^+^ DEFAULT)")
+        .fails("(?s)Encountered \"\\+ DEFAULT\" at .*");
+    sql("insert into dept (name, deptno) select 'a'^,^ DEFAULT from (values 0)")
+        .fails("(?s)Encountered \", DEFAULT\" at .*");
   }
 
   @Test public void testAggregateFilter() {
@@ -2481,6 +2548,13 @@ public class SqlParserTest {
             + "FROM `FOO`\n"
             + "OFFSET 1 ROWS\n"
             + "FETCH NEXT 3 ROWS ONLY");
+    // OFFSET and FETCH, with dynamic parameters
+    check(
+        "select a from foo offset ? row fetch next ? rows only",
+        "SELECT `A`\n"
+            + "FROM `FOO`\n"
+            + "OFFSET ? ROWS\n"
+            + "FETCH NEXT ? ROWS ONLY");
     // missing ROWS after FETCH
     checkFails(
         "select a from foo offset 1 fetch next 3 ^only^",
@@ -3336,6 +3410,24 @@ public class SqlParserTest {
     final String expected = "INSERT INTO `EMPS`\n"
         + "VALUES (ROW(1, 'Fredkin'))";
     sql("insert into emps values (1,'Fredkin')")
+        .ok(expected)
+        .node(not(isDdl()));
+  }
+
+  @Test public void testInsertValuesDefault() {
+    final String expected = "INSERT INTO `EMPS`\n"
+        + "VALUES (ROW(1, DEFAULT, 'Fredkin'))";
+    sql("insert into emps values (1,DEFAULT,'Fredkin')")
+        .ok(expected)
+        .node(not(isDdl()));
+  }
+
+  @Test public void testInsertValuesRawDefault() {
+    final String expected = "INSERT INTO `EMPS`\n"
+        + "VALUES (ROW(DEFAULT))";
+    sql("insert into emps ^values^ default")
+        .fails("(?s).*Encountered \"values default\" at .*");
+    sql("insert into emps values (default)")
         .ok(expected)
         .node(not(isDdl()));
   }
@@ -4200,34 +4292,34 @@ public class SqlParserTest {
   }
 
   @Test public void testMultisetUnion() {
-    checkExp("a multiset union b", "(`A` MULTISET UNION `B`)");
+    checkExp("a multiset union b", "(`A` MULTISET UNION ALL `B`)");
     checkExp("a multiset union all b", "(`A` MULTISET UNION ALL `B`)");
-    checkExp("a multiset union distinct b", "(`A` MULTISET UNION `B`)");
+    checkExp("a multiset union distinct b", "(`A` MULTISET UNION DISTINCT `B`)");
   }
 
   @Test public void testMultisetExcept() {
-    checkExp("a multiset EXCEPT b", "(`A` MULTISET EXCEPT `B`)");
+    checkExp("a multiset EXCEPT b", "(`A` MULTISET EXCEPT ALL `B`)");
     checkExp("a multiset EXCEPT all b", "(`A` MULTISET EXCEPT ALL `B`)");
-    checkExp("a multiset EXCEPT distinct b", "(`A` MULTISET EXCEPT `B`)");
+    checkExp("a multiset EXCEPT distinct b", "(`A` MULTISET EXCEPT DISTINCT `B`)");
   }
 
   @Test public void testMultisetIntersect() {
-    checkExp("a multiset INTERSECT b", "(`A` MULTISET INTERSECT `B`)");
+    checkExp("a multiset INTERSECT b", "(`A` MULTISET INTERSECT ALL `B`)");
     checkExp(
         "a multiset INTERSECT all b",
         "(`A` MULTISET INTERSECT ALL `B`)");
     checkExp(
         "a multiset INTERSECT distinct b",
-        "(`A` MULTISET INTERSECT `B`)");
+        "(`A` MULTISET INTERSECT DISTINCT `B`)");
   }
 
   @Test public void testMultisetMixed() {
     checkExp(
         "multiset[1] MULTISET union b",
-        "((MULTISET[1]) MULTISET UNION `B`)");
+        "((MULTISET[1]) MULTISET UNION ALL `B`)");
     checkExp(
         "a MULTISET union b multiset intersect c multiset except d multiset union e",
-        "(((`A` MULTISET UNION (`B` MULTISET INTERSECT `C`)) MULTISET EXCEPT `D`) MULTISET UNION `E`)");
+        "(((`A` MULTISET UNION ALL (`B` MULTISET INTERSECT ALL `C`)) MULTISET EXCEPT ALL `D`) MULTISET UNION ALL `E`)");
   }
 
   @Test public void testMapItem() {
@@ -6823,8 +6915,8 @@ public class SqlParserTest {
   @Test public void testTimestampAddAndDiff() {
     Map<String, List<String>> tsi = ImmutableMap.<String, List<String>>builder()
         .put("MICROSECOND",
-            Arrays.asList("FRAC_SECOND", "MICROSECOND",
-                "SQL_TSI_FRAC_SECOND", "SQL_TSI_MICROSECOND"))
+            Arrays.asList("FRAC_SECOND", "MICROSECOND", "SQL_TSI_MICROSECOND"))
+        .put("NANOSECOND", Arrays.asList("NANOSECOND", "SQL_TSI_FRAC_SECOND"))
         .put("SECOND", Arrays.asList("SECOND", "SQL_TSI_SECOND"))
         .put("MINUTE", Arrays.asList("MINUTE", "SQL_TSI_MINUTE"))
         .put("HOUR", Arrays.asList("HOUR", "SQL_TSI_HOUR"))
@@ -7060,14 +7152,15 @@ public class SqlParserTest {
     assumeTrue("don't run this test for sub-classes", isNotSubclass());
     // inUrl = "file:/home/x/calcite/core/target/test-classes/hsqldb-model.json"
     String path = "hsqldb-model.json";
-    final URL inUrl = SqlParserTest.class.getResource("/" + path);
-    // URL will convert spaces to %20, undo that
-    String x = URLDecoder.decode(inUrl.getFile(), "UTF-8");
-    assert x.endsWith(path);
-    x = x.substring(0, x.length() - path.length());
-    assert x.endsWith("core/target/test-classes/");
-    x = x.substring(0, x.length() - "core/target/test-classes/".length());
-    final File base = new File(x);
+    File hsqlDbModel = Sources.of(SqlParserTest.class.getResource("/" + path)).file();
+    assert hsqlDbModel.getAbsolutePath().endsWith(
+        Paths.get("core", "target", "test-classes", "hsqldb-model.json").toString())
+        : hsqlDbModel.getAbsolutePath()
+        + " should end with core/target/test-classes/hsqldb-model.json";
+    // skip hsqldb-model.json, test-classes, target, core
+    // The assertion above protects us from walking over unrelated paths
+    final File base = hsqlDbModel.getAbsoluteFile()
+        .getParentFile().getParentFile().getParentFile().getParentFile();
     final File inFile = new File(base, "site/_docs/reference.md");
     final File outFile = new File(base, "core/target/surefire/reference.md");
     outFile.getParentFile().mkdirs();
@@ -8268,24 +8361,50 @@ public class SqlParserTest {
    * {@code sql("values 1").ok();}. */
   protected class Sql {
     private final String sql;
+    private final boolean expression;
 
     Sql(String sql) {
+      this(sql, false);
+    }
+
+    Sql(String sql, boolean expression) {
       this.sql = sql;
+      this.expression = expression;
     }
 
     public Sql ok(String expected) {
-      getTester().check(sql, expected);
+      if (expression) {
+        getTester().checkExp(sql, expected);
+      } else {
+        getTester().check(sql, expected);
+      }
       return this;
     }
 
     public Sql fails(String expectedMsgPattern) {
-      getTester().checkFails(sql, expectedMsgPattern);
+      if (expression) {
+        getTester().checkExpFails(sql, expectedMsgPattern);
+      } else {
+        getTester().checkFails(sql, expectedMsgPattern);
+      }
       return this;
     }
 
     public Sql node(Matcher<SqlNode> matcher) {
       getTester().checkNode(sql, matcher);
       return this;
+    }
+
+    /** Flags that this is an expression, not a whole query. */
+    public Sql expression() {
+      return expression ? this : new Sql(sql, true);
+    }
+
+    /** Removes the carets from the SQL string. Useful if you want to run
+     * a test once at a conformance level where it fails, then run it again
+     * at a conformance level where it succeeds. */
+    public Sql sansCarets() {
+      return new Sql(sql.replace("^", ""), expression);
     }
   }
 

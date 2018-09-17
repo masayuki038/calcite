@@ -23,16 +23,14 @@ import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelOptListener;
 import org.apache.calcite.plan.RelOptRule;
 import org.apache.calcite.plan.RelOptRuleCall;
-import org.apache.calcite.plan.RelOptUtil;
 import org.apache.calcite.plan.RelTraitSet;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.convert.ConverterImpl;
 import org.apache.calcite.rel.convert.ConverterRule;
+import org.apache.calcite.rel.core.RelFactories;
 import org.apache.calcite.rel.logical.LogicalProject;
 import org.apache.calcite.rel.rules.ProjectRemoveRule;
-import org.apache.calcite.rex.RexInputRef;
-
-import com.google.common.collect.ImmutableList;
+import org.apache.calcite.tools.RelBuilder;
 
 import org.junit.Ignore;
 import org.junit.Test;
@@ -53,7 +51,6 @@ import static org.apache.calcite.plan.volcano.PlannerTests.TestSingleRel;
 import static org.apache.calcite.plan.volcano.PlannerTests.newCluster;
 
 import static org.hamcrest.CoreMatchers.equalTo;
-
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertThat;
@@ -229,12 +226,12 @@ public class VolcanoPlannerTest {
         new PhysLeafRel(
             cluster,
             "a");
-    RexInputRef inputRef = RexInputRef.of(0, leafRel.getRowType());
+    final RelBuilder relBuilder =
+        RelFactories.LOGICAL_BUILDER.create(leafRel.getCluster(), null);
     RelNode projectRel =
-        RelOptUtil.createProject(
-            leafRel,
-            ImmutableList.of(inputRef),
-            ImmutableList.of("this"));
+        relBuilder.push(leafRel)
+            .project(relBuilder.alias(relBuilder.field(0), "this"))
+            .build();
     NoneSingleRel singleRel =
         new NoneSingleRel(
             cluster,

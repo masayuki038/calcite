@@ -43,10 +43,10 @@ import org.apache.calcite.sql.SqlKind;
 import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.validate.CyclicDefinitionException;
 import org.apache.calcite.sql.validate.SqlValidator;
+import org.apache.calcite.tools.RelRunner;
 import org.apache.calcite.util.ImmutableIntList;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
-
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 
@@ -62,18 +62,9 @@ import java.util.Map;
  * API for a service that prepares statements for execution.
  */
 public interface CalcitePrepare {
-  Function0<CalcitePrepare> DEFAULT_FACTORY =
-      new Function0<CalcitePrepare>() {
-        public CalcitePrepare apply() {
-          return new CalcitePrepareImpl();
-        }
-      };
+  Function0<CalcitePrepare> DEFAULT_FACTORY = CalcitePrepareImpl::new;
   ThreadLocal<Deque<Context>> THREAD_CONTEXT_STACK =
-      new ThreadLocal<Deque<Context>>() {
-        @Override protected Deque<Context> initialValue() {
-          return new ArrayDeque<>();
-        }
-      };
+      ThreadLocal.withInitial(ArrayDeque::new);
 
   ParseResult parse(Context context, String sql);
 
@@ -109,7 +100,14 @@ public interface CalcitePrepare {
   interface Context {
     JavaTypeFactory getTypeFactory();
 
+    /** Returns the root schema for statements that need a read-consistent
+     * snapshot. */
     CalciteSchema getRootSchema();
+
+    /** Returns the root schema for statements that need to be able to modify
+     * schemas and have the results available to other statements. Viz, DDL
+     * statements. */
+    CalciteSchema getMutableRootSchema();
 
     List<String> getDefaultSchemaPath();
 
@@ -126,6 +124,9 @@ public interface CalcitePrepare {
      * being analyzed further up the stack, the view definition can be deduced
      * to be cyclic. */
     List<String> getObjectPath();
+
+    /** Gets a runner; it can execute a relational expression. */
+    RelRunner getRelRunner();
   }
 
   /** Callback to register Spark as the main engine. */
@@ -319,17 +320,15 @@ public interface CalcitePrepare {
     private final long maxRowCount;
     private final Bindable<T> bindable;
 
+    @Deprecated // to be removed before 2.0
     public CalciteSignature(String sql, List<AvaticaParameter> parameterList,
         Map<String, Object> internalParameters, RelDataType rowType,
         List<ColumnMetaData> columns, Meta.CursorFactory cursorFactory,
         CalciteSchema rootSchema, List<RelCollation> collationList,
         long maxRowCount, Bindable<T> bindable) {
-      super(columns, sql, parameterList, internalParameters, cursorFactory, null);
-      this.rowType = rowType;
-      this.rootSchema = rootSchema;
-      this.collationList = collationList;
-      this.maxRowCount = maxRowCount;
-      this.bindable = bindable;
+      this(sql, parameterList, internalParameters, rowType, columns,
+          cursorFactory, rootSchema, collationList, maxRowCount, bindable,
+          null);
     }
 
     public CalciteSignature(String sql,

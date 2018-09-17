@@ -81,7 +81,7 @@ The page describes the SQL dialect recognized by Calcite's default SQL parser.
 
 ## Grammar
 
-SQL grammar in [BNF](http://en.wikipedia.org/wiki/Backus%E2%80%93Naur_Form)-like
+SQL grammar in [BNF](https://en.wikipedia.org/wiki/Backus%E2%80%93Naur_Form)-like
 form.
 
 {% highlight sql %}
@@ -250,6 +250,9 @@ in those same conformance levels, any *column* in *insert* may be replaced by
 
 In *orderItem*, if *expression* is a positive integer *n*, it denotes
 the <em>n</em>th item in the SELECT clause.
+
+In *query*, *count* and *start* may each be either an unsigned integer literal
+or a dynamic parameter whose value is an integer.
 
 An aggregate query is a query that contains a GROUP BY or a HAVING
 clause, or aggregate functions in the SELECT clause. In the SELECT,
@@ -547,7 +550,9 @@ INSTANTIABLE,
 **INTO**,
 INVOKER,
 **IS**,
+ISODOW,
 ISOLATION,
+ISOYEAR,
 JAVA,
 **JOIN**,
 JSON,
@@ -595,6 +600,7 @@ MESSAGE_TEXT,
 **METHOD**,
 MICROSECOND,
 MILLENNIUM,
+MILLISECOND,
 **MIN**,
 **MINUS**,
 **MINUTE**,
@@ -608,6 +614,7 @@ MORE,
 MUMPS,
 NAME,
 NAMES,
+NANOSECOND,
 **NATIONAL**,
 **NATURAL**,
 **NCHAR**,
@@ -1035,7 +1042,7 @@ for example `ST_GeomFromText('POINT (30 10)')`.
 | MULTICURVE         |  - | generalization of MULTILINESTRING
 | MULTILINESTRING    |  5 | <tt>ST_GeomFromText(&#8203;'MULTILINESTRING ((10 10, 20 20, 10 40), (40 40, 30 30, 40 20, 30 10))')</tt>
 | MULTISURFACE       |  - | generalization of MULTIPOLYGON
-| MULTIPOLYGON       |  6 | <tt>ST_GeomFromText(`&#8203;'MULTIPOLYGON (((30 20, 45 40, 10 40, 30 20)), ((15 5, 40 10, 10 20, 5 10, 15 5)))')</tt>
+| MULTIPOLYGON       |  6 | <tt>ST_GeomFromText(&#8203;'MULTIPOLYGON (((30 20, 45 40, 10 40, 30 20)), ((15 5, 40 10, 10 20, 5 10, 15 5)))')</tt>
 
 ## Operators and functions
 
@@ -1264,8 +1271,18 @@ Not implemented:
 |:--------------- |:-----------
 | ELEMENT(value)  | Returns the sole element of a array or multiset; null if the collection is empty; throws if it has more than one element.
 | CARDINALITY(value) | Returns the number of elements in an array or multiset.
+| value MEMBER OF multiset | Returns whether the *value* is a member of *multiset*.
+| multiset IS A SET | Whether *multiset* is a set (has no duplicates).
+| multiset IS NOT A SET | Whether *multiset* is not a set (has duplicates).
+| multiset IS EMPTY | Whether *multiset* contains zero elements.
+| multiset IS NOT EMPTY | Whether *multiset* contains one or more elements.
+| multiset SUBMULTISET OF multiset2 | Whether *multiset* is a submultiset of *multiset2*.
+| multiset NOT SUBMULTISET OF multiset2 | Whether *multiset* is not a submultiset of *multiset2*.
+| multiset MULTISET UNION [ ALL &#124; DISTINCT ] multiset2 | Returns the union *multiset* and *multiset2*, eliminating duplicates if DISTINCT is specified (ALL is the default).
+| multiset MULTISET INTERSECT [ ALL &#124; DISTINCT ] multiset2 | Returns the intersection of *multiset* and *multiset2*, eliminating duplicates if DISTINCT is specified (ALL is the default).
+| multiset MULTISET EXCEPT [ ALL &#124; DISTINCT ] multiset2 | Returns the difference of *multiset* and *multiset2*, eliminating duplicates if DISTINCT is specified (ALL is the default).
 
-See also: UNNEST relational operator converts a collection to a relation.
+See also: the UNNEST relational operator converts a collection to a relation.
 
 ### Period predicates
 
@@ -1480,17 +1497,20 @@ passed to the aggregate function.
 | COLLECT( [ ALL &#124; DISTINCT ] value)       | Returns a multiset of the values
 | COUNT( [ ALL &#124; DISTINCT ] value [, value ]*) | Returns the number of input rows for which *value* is not null (wholly not null if *value* is composite)
 | COUNT(*)                           | Returns the number of input rows
+| FUSION( multiset )                 | Returns the multiset union of *multiset* across all input values
 | APPROX_COUNT_DISTINCT(value [, value ]*)      | Returns the approximate number of distinct values of *value*; the database is allowed to use an approximation but is not required to
 | AVG( [ ALL &#124; DISTINCT ] numeric)         | Returns the average (arithmetic mean) of *numeric* across all input values
 | SUM( [ ALL &#124; DISTINCT ] numeric)         | Returns the sum of *numeric* across all input values
 | MAX( [ ALL &#124; DISTINCT ] value)           | Returns the maximum value of *value* across all input values
 | MIN( [ ALL &#124; DISTINCT ] value)           | Returns the minimum value of *value* across all input values
+| ANY_VALUE( [ ALL &#124; DISTINCT ] value)     | Returns one of the values of *value* across all input values; this is NOT specified in the SQL standard
 | STDDEV_POP( [ ALL &#124; DISTINCT ] numeric)  | Returns the population standard deviation of *numeric* across all input values
 | STDDEV_SAMP( [ ALL &#124; DISTINCT ] numeric) | Returns the sample standard deviation of *numeric* across all input values
 | VAR_POP( [ ALL &#124; DISTINCT ] value)       | Returns the population variance (square of the population standard deviation) of *numeric* across all input values
 | VAR_SAMP( [ ALL &#124; DISTINCT ] numeric)    | Returns the sample variance (square of the sample standard deviation) of *numeric* across all input values
 | COVAR_POP(numeric1, numeric2)      | Returns the population covariance of the pair (*numeric1*, *numeric2*) across all input values
 | COVAR_SAMP(numeric1, numeric2)     | Returns the sample covariance of the pair (*numeric1*, *numeric2*) across all input values
+| REGR_COUNT(numeric1, numeric2)     | Returns the number of rows where both dependent and independent expressions are not null
 | REGR_SXX(numeric1, numeric2)       | Returns the sum of squares of the dependent expression in a linear regression model
 | REGR_SYY(numeric1, numeric2)       | Returns the sum of squares of the independent expression in a linear regression model
 
@@ -1498,7 +1518,6 @@ Not implemented:
 
 * REGR_AVGX(numeric1, numeric2)
 * REGR_AVGY(numeric1, numeric2)
-* REGR_COUNT(numeric1, numeric2)
 * REGR_INTERCEPT(numeric1, numeric2)
 * REGR_R2(numeric1, numeric2)
 * REGR_SLOPE(numeric1, numeric2)
@@ -1521,6 +1540,7 @@ Not implemented:
 | LAST_VALUE(value) OVER window             | Returns *value* evaluated at the row that is the last row of the window frame
 | LEAD(value, offset, default) OVER window  | Returns *value* evaluated at the row that is *offset* rows after the current row within the partition; if there is no such row, instead returns *default*. Both *offset* and *default* are evaluated with respect to the current row. If omitted, *offset* defaults to 1 and *default* to NULL
 | LAG(value, offset, default) OVER window   | Returns *value* evaluated at the row that is *offset* rows before the current row within the partition; if there is no such row, instead returns *default*. Both *offset* and *default* are evaluated with respect to the current row. If omitted, *offset* defaults to 1 and *default* to NULL
+| NTH_VALUE(value, nth) OVER window         | Returns *value* evaluated at the row that is the *n*th row of the window frame
 | NTILE(value) OVER window                  | Returns an integer ranging from 1 to *value*, dividing the partition as equally as possible
 
 Not implemented:
@@ -1531,7 +1551,7 @@ Not implemented:
 * LAST_VALUE(value) IGNORE NULLS OVER window
 * PERCENT_RANK(value) OVER window
 * CUME_DIST(value) OVER window
-* NTH_VALUE(value, nth) OVER window
+* NTH_VALUE(value, nth) [ FROM { FIRST | LAST } ] IGNORE NULLS OVER window
 
 ### Grouping functions
 
@@ -1961,12 +1981,14 @@ that is used if they are not specified).
 
 Suppose you have a function `f`, declared as in the following pseudo syntax:
 
-```FUNCTION f(
+{% highlight sql %}
+FUNCTION f(
   INTEGER a,
   INTEGER b DEFAULT NULL,
   INTEGER c,
   INTEGER d DEFAULT NULL,
-  INTEGER e DEFAULT NULL) RETURNS INTEGER```
+  INTEGER e DEFAULT NULL) RETURNS INTEGER
+{% endhighlight sql %}
 
 All of the function's parameters have names, and parameters `b`, `d` and `e`
 have a default value of `NULL` and are therefore optional.
@@ -1997,7 +2019,6 @@ Here are some examples:
 * `f(c => 3, d => 1, a => 0)` is equivalent to `f(0, NULL, 3, 1, NULL)`;
 * `f(c => 3, d => 1)` is not legal, because you have not specified a value for
   `a` and `a` is not optional.
-```
 
 ### MATCH_RECOGNIZE
 
@@ -2035,7 +2056,7 @@ measureColumn:
       expression AS alias
 
 pattern:
-      patternTerm ['|' patternTerm ]*
+      patternTerm [ '|' patternTerm ]*
 
 patternTerm:
       patternFactor [ patternFactor ]*
@@ -2067,3 +2088,116 @@ intervalLiteral:
 
 In *patternQuantifier*, *repeat* is a positive integer,
 and *minRepeat* and *maxRepeat* are non-negative integers.
+
+### DDL Extensions
+
+DDL extensions are only available in the calcite-server module.
+To enable, include `calcite-server.jar` in your class path, and add
+`parserFactory=org.apache.calcite.sql.parser.ddl.SqlDdlParserImpl#FACTORY`
+to the JDBC connect string (see connect string property
+[parserFactory]({{ site.apiRoot }}/org/apache/calcite/config/CalciteConnectionProperty.html#PARSER_FACTORY)).
+
+{% highlight sql %}
+ddlStatement:
+      createSchemaStatement
+  |   createForeignSchemaStatement
+  |   createTableStatement
+  |   createViewStatement
+  |   createMaterializedViewStatement
+  |   createTypeStatement
+  |   dropSchemaStatement
+  |   dropForeignSchemaStatement
+  |   dropTableStatement
+  |   dropViewStatement
+  |   dropMaterializedViewStatement
+  |   dropTypeStatement
+
+createSchemaStatement:
+      CREATE [ OR REPLACE ] SCHEMA [ IF NOT EXISTS ] name
+
+createForeignSchemaStatement:
+      CREATE [ OR REPLACE ] FOREIGN SCHEMA [ IF NOT EXISTS ] name
+      (
+          TYPE 'type'
+      |   LIBRARY 'com.example.calcite.ExampleSchemaFactory'
+      )
+      [ OPTIONS '(' option [, option ]* ')' ]
+
+option:
+      name literal
+
+createTableStatement:
+      CREATE TABLE [ IF NOT EXISTS ] name
+      [ '(' tableElement [, tableElement ]* ')' ]
+      [ AS query ]
+
+createTypeStatement:
+      CREATE [ OR REPLACE ] TYPE name AS
+      {
+          baseType
+      |   '(' attributeDef [, attributeDef ]* ')'
+      }
+
+attributeDef:
+      attributeName type
+      [ COLLATE collation ]
+      [ NULL | NOT NULL ]
+      [ DEFAULT expression ]
+
+tableElement:
+      columnName type [ columnGenerator ] [ columnConstraint ]
+  |   columnName
+  |   tableConstraint
+
+columnGenerator:
+      DEFAULT expression
+  |   [ GENERATED ALWAYS ] AS '(' expression ')'
+      { VIRTUAL | STORED }
+
+columnConstraint:
+      [ CONSTRAINT name ]
+      [ NOT ] NULL
+
+tableConstraint:
+      [ CONSTRAINT name ]
+      {
+          CHECK '(' expression ')'
+      |   PRIMARY KEY '(' columnName [, columnName ]* ')'
+      |   UNIQUE '(' columnName [, columnName ]* ')'
+      }
+
+createViewStatement:
+      CREATE [ OR REPLACE ] VIEW name
+      [ '(' columnName [, columnName ]* ')' ]
+      AS query
+
+createMaterializedViewStatement:
+      CREATE MATERIALIZED VIEW [ IF NOT EXISTS ] name
+      [ '(' columnName [, columnName ]* ')' ]
+      AS query
+
+dropSchemaStatement:
+      DROP SCHEMA [ IF EXISTS ] name
+
+dropForeignSchemaStatement:
+      DROP FOREIGN SCHEMA [ IF EXISTS ] name
+
+dropTableStatement:
+      DROP TABLE [ IF EXISTS ] name
+
+dropViewStatement:
+      DROP VIEW [ IF EXISTS ] name
+
+dropMaterializedViewStatement:
+      DROP MATERIALIZED VIEW [ IF EXISTS ] name
+
+dropTypeStatement:
+      DROP TYPE [ IF EXISTS ] name
+{% endhighlight %}
+
+In *createTableStatement*, if you specify *AS query*, you may omit the list of
+*tableElement*s, or you can omit the data type of any *tableElement*, in which
+case it just renames the underlying column.
+
+In *columnGenerator*, if you do not specify `VIRTUAL` or `STORED` for a
+generated column, `VIRTUAL` is the default.

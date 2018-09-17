@@ -43,6 +43,7 @@ import org.apache.calcite.rel.type.RelDataTypeField;
 import org.apache.calcite.rel.type.RelDataTypeImpl;
 import org.apache.calcite.rex.RexBuilder;
 import org.apache.calcite.rex.RexCorrelVariable;
+import org.apache.calcite.rex.RexDynamicParam;
 import org.apache.calcite.rex.RexFieldAccess;
 import org.apache.calcite.rex.RexLiteral;
 import org.apache.calcite.rex.RexNode;
@@ -64,7 +65,6 @@ import org.apache.calcite.util.mapping.Mapping;
 import org.apache.calcite.util.mapping.MappingType;
 import org.apache.calcite.util.mapping.Mappings;
 
-import com.google.common.base.Function;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 
@@ -527,6 +527,12 @@ public class RelFieldTrimmer implements ReflectiveVisitor {
       return result(sort, Mappings.createIdentity(fieldCount));
     }
 
+    // leave the Sort unchanged in case we have dynamic limits
+    if (sort.offset instanceof RexDynamicParam
+        || sort.fetch instanceof RexDynamicParam) {
+      return result(sort, inputMapping);
+    }
+
     relBuilder.push(newInput);
     final int offset =
         sort.offset == null ? 0 : RexLiteral.intValue(sort.offset);
@@ -606,7 +612,7 @@ public class RelFieldTrimmer implements ReflectiveVisitor {
       // on-demand fields.
       Set<RelDataTypeField> inputExtraFields =
           RelDataTypeImpl.extra(inputRowType) == null
-              ? Collections.<RelDataTypeField>emptySet()
+              ? Collections.emptySet()
               : combinedInputExtraFields;
       inputExtraFieldCounts.add(inputExtraFields.size());
       TrimResult trimResult =
@@ -841,11 +847,7 @@ public class RelFieldTrimmer implements ReflectiveVisitor {
     final ImmutableList<ImmutableBitSet> newGroupSets =
         ImmutableList.copyOf(
             Iterables.transform(aggregate.getGroupSets(),
-                new Function<ImmutableBitSet, ImmutableBitSet>() {
-                  public ImmutableBitSet apply(ImmutableBitSet input) {
-                    return Mappings.apply(inputMapping, input);
-                  }
-                }));
+                input1 -> Mappings.apply(inputMapping, input1)));
 
     // Populate mapping of where to find the fields. System, group key and
     // indicator fields first.

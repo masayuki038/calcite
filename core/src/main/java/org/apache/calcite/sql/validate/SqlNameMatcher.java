@@ -21,6 +21,7 @@ import org.apache.calcite.rel.type.RelDataTypeField;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Checks whether two names are the same according to a case-sensitivity policy.
@@ -49,7 +50,7 @@ public interface SqlNameMatcher {
    * throws {@link UnsupportedOperationException}. */
   String bestString();
 
-  /** Finds a field with a given name, using the currenct case-sensitivity,
+  /** Finds a field with a given name, using the current case-sensitivity,
    * returning null if not found.
    *
    * @param rowType    Row type
@@ -57,6 +58,14 @@ public interface SqlNameMatcher {
    * @return Field, or null if not found
    */
   RelDataTypeField field(RelDataType rowType, String fieldName);
+
+  /** Returns how many times a string occurs in a collection.
+   *
+   * <p>Similar to {@link java.util.Collections#frequency}. */
+  int frequency(Iterable<String> names, String name);
+
+  /** Creates a set that has the same case-sensitivity as this matcher. */
+  Set<String> createSet();
 }
 
 // End SqlNameMatcher.java

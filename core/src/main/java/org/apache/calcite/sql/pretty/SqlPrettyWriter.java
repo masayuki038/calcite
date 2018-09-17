@@ -914,47 +914,7 @@ public class SqlPrettyWriter implements SqlWriter {
     if (fetch == null && offset == null) {
       return;
     }
-    if (dialect.supportsOffsetFetch()) {
-      if (offset != null) {
-        this.newlineAndIndent();
-        final Frame offsetFrame =
-            this.startList(FrameTypeEnum.OFFSET);
-        this.keyword("OFFSET");
-        offset.unparse(this, -1, -1);
-        this.keyword("ROWS");
-        this.endList(offsetFrame);
-      }
-      if (fetch != null) {
-        this.newlineAndIndent();
-        final Frame fetchFrame =
-            this.startList(FrameTypeEnum.FETCH);
-        this.keyword("FETCH");
-        this.keyword("NEXT");
-        fetch.unparse(this, -1, -1);
-        this.keyword("ROWS");
-        this.keyword("ONLY");
-        this.endList(fetchFrame);
-      }
-    } else {
-      // Dialect does not support OFFSET/FETCH clause.
-      // Assume it uses LIMIT/OFFSET.
-      if (fetch != null) {
-        this.newlineAndIndent();
-        final Frame fetchFrame =
-            this.startList(FrameTypeEnum.FETCH);
-        this.keyword("LIMIT");
-        fetch.unparse(this, -1, -1);
-        this.endList(fetchFrame);
-      }
-      if (offset != null) {
-        this.newlineAndIndent();
-        final Frame offsetFrame =
-            this.startList(FrameTypeEnum.OFFSET);
-        this.keyword("OFFSET");
-        offset.unparse(this, -1, -1);
-        this.endList(offsetFrame);
-      }
-    }
+    dialect.unparseOffsetFetch(this, offset, fetch);
   }
 
   public Frame startFunCall(String funName) {
@@ -1182,7 +1142,7 @@ public class SqlPrettyWriter implements SqlWriter {
       final Set<String> names = new HashSet<>();
       names.addAll(getterMethods.keySet());
       names.addAll(setterMethods.keySet());
-      return names.toArray(new String[names.size()]);
+      return names.toArray(new String[0]);
     }
   }
 }

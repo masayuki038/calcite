@@ -20,6 +20,7 @@ import org.apache.calcite.config.NullCollation;
 import org.apache.calcite.jdbc.CalciteSchema;
 import org.apache.calcite.linq4j.Ord;
 import org.apache.calcite.linq4j.function.Function2;
+import org.apache.calcite.linq4j.function.Functions;
 import org.apache.calcite.plan.RelOptTable;
 import org.apache.calcite.plan.RelOptUtil;
 import org.apache.calcite.prepare.Prepare;
@@ -37,6 +38,7 @@ import org.apache.calcite.runtime.CalciteContextException;
 import org.apache.calcite.runtime.CalciteException;
 import org.apache.calcite.runtime.Feature;
 import org.apache.calcite.runtime.Resources;
+import org.apache.calcite.schema.ColumnStrategy;
 import org.apache.calcite.schema.Table;
 import org.apache.calcite.schema.impl.ModifiableViewTable;
 import org.apache.calcite.sql.JoinConditionType;
@@ -91,6 +93,7 @@ import org.apache.calcite.sql2rel.InitializerContext;
 import org.apache.calcite.util.BitString;
 import org.apache.calcite.util.Bug;
 import org.apache.calcite.util.ImmutableBitSet;
+import org.apache.calcite.util.ImmutableIntList;
 import org.apache.calcite.util.ImmutableNullableList;
 import org.apache.calcite.util.Litmus;
 import org.apache.calcite.util.Pair;
@@ -99,10 +102,7 @@ import org.apache.calcite.util.Util;
 import org.apache.calcite.util.trace.CalciteTrace;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Function;
-import com.google.common.base.Joiner;
 import com.google.common.base.Preconditions;
-import com.google.common.base.Supplier;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Lists;
@@ -124,12 +124,12 @@ import java.util.GregorianCalendar;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
-import java.util.TreeSet;
+import java.util.function.Supplier;
 
 import static org.apache.calcite.sql.SqlUtil.stripAs;
 import static org.apache.calcite.util.Static.RESOURCE;
@@ -297,10 +297,10 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
       SqlValidatorCatalogReader catalogReader,
       RelDataTypeFactory typeFactory,
       SqlConformance conformance) {
-    this.opTab = Preconditions.checkNotNull(opTab);
-    this.catalogReader = Preconditions.checkNotNull(catalogReader);
-    this.typeFactory = Preconditions.checkNotNull(typeFactory);
-    this.conformance = Preconditions.checkNotNull(conformance);
+    this.opTab = Objects.requireNonNull(opTab);
+    this.catalogReader = Objects.requireNonNull(catalogReader);
+    this.typeFactory = Objects.requireNonNull(typeFactory);
+    this.conformance = Objects.requireNonNull(conformance);
 
     unknownType = typeFactory.createUnknownType();
     booleanType = typeFactory.createSqlType(SqlTypeName.BOOLEAN);
@@ -344,14 +344,13 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
     final List<Map.Entry<String, RelDataType>> types = new ArrayList<>();
     for (int i = 0; i < selectList.size(); i++) {
       final SqlNode selectItem = selectList.get(i);
+      final RelDataType originalType = getValidatedNodeTypeIfKnown(selectItem);
       expandSelectItem(
           selectItem,
           select,
-          unknownType,
+          Util.first(originalType, unknownType),
           list,
-          catalogReader.nameMatcher().isCaseSensitive()
-              ? new LinkedHashSet<String>()
-              : new TreeSet<>(String.CASE_INSENSITIVE_ORDER),
+          catalogReader.nameMatcher().createSet(),
           types,
           includeSystemVars);
     }
@@ -407,7 +406,7 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
    * @param select            Containing select clause
    * @param selectItems       List that expanded items are written to
    * @param aliases           Set of aliases
-   * @param types             List of data types in alias order
+   * @param fields            List of field names and types, in alias order
    * @param includeSystemVars If true include system vars in lists
    * @return Whether the node was expanded
    */
@@ -417,10 +416,10 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
       RelDataType targetType,
       List<SqlNode> selectItems,
       Set<String> aliases,
-      List<Map.Entry<String, RelDataType>> types,
+      List<Map.Entry<String, RelDataType>> fields,
       final boolean includeSystemVars) {
     final SelectScope scope = (SelectScope) getWhereScope(select);
-    if (expandStar(selectItems, aliases, types, includeSystemVars, scope,
+    if (expandStar(selectItems, aliases, fields, includeSystemVars, scope,
         selectItem)) {
       return true;
     }
@@ -457,12 +456,12 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
     inferUnknownTypes(targetType, scope, expanded);
     final RelDataType type = deriveType(selectScope, expanded);
     setValidatedNodeType(expanded, type);
-    types.add(Pair.of(alias, type));
+    fields.add(Pair.of(alias, type));
     return false;
   }
 
   private boolean expandStar(List<SqlNode> selectItems, Set<String> aliases,
-      List<Map.Entry<String, RelDataType>> types, boolean includeSystemVars,
+      List<Map.Entry<String, RelDataType>> fields, boolean includeSystemVars,
       SelectScope scope, SqlNode node) {
     if (!(node instanceof SqlIdentifier)) {
       return false;
@@ -474,9 +473,11 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
     final SqlParserPos startPosition = identifier.getParserPosition();
     switch (identifier.names.size()) {
     case 1:
+      boolean hasDynamicStruct = false;
       for (ScopeChild child : scope.children) {
-        final int before = types.size();
+        final int before = fields.size();
         if (child.namespace.getRowType().isDynamicStruct()) {
+          hasDynamicStruct = true;
           // don't expand star if the underneath table is dynamic.
           // Treat this star as a special field in validation/conversion and
           // wait until execution time to expand this star.
@@ -488,7 +489,7 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
           addToSelectList(
                selectItems,
                aliases,
-               types,
+               fields,
                exp,
                scope,
                includeSystemVars);
@@ -510,7 +511,7 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
               addOrExpandField(
                       selectItems,
                       aliases,
-                      types,
+                      fields,
                       includeSystemVars,
                       scope,
                       exp,
@@ -519,16 +520,21 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
           }
         }
         if (child.nullable) {
-          for (int i = before; i < types.size(); i++) {
-            final Map.Entry<String, RelDataType> entry = types.get(i);
+          for (int i = before; i < fields.size(); i++) {
+            final Map.Entry<String, RelDataType> entry = fields.get(i);
             final RelDataType type = entry.getValue();
             if (!type.isNullable()) {
-              types.set(i,
+              fields.set(i,
                   Pair.of(entry.getKey(),
                       typeFactory.createTypeWithNullability(type, true)));
             }
           }
         }
+      }
+      // If NATURAL JOIN or USING is present, move key fields to the front of
+      // the list, per standard SQL. Disabled if there are dynamic fields.
+      if (!hasDynamicStruct || Bug.CALCITE_2400_FIXED) {
+        new Permute(scope.getNode().getFrom(), 0).permute(selectItems, fields);
       }
       return true;
 
@@ -551,7 +557,7 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
         addToSelectList(
             selectItems,
             aliases,
-            types,
+            fields,
             prefixId.plus(DynamicRecordType.DYNAMIC_STAR_PREFIX, startPosition),
             scope,
             includeSystemVars);
@@ -563,7 +569,7 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
           addOrExpandField(
               selectItems,
               aliases,
-              types,
+              fields,
               includeSystemVars,
               scope,
               prefixId.plus(columnName, startPosition),
@@ -576,8 +582,19 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
     }
   }
 
+  private SqlNode maybeCast(SqlNode node, RelDataType currentType,
+      RelDataType desiredType) {
+    return currentType.equals(desiredType)
+        || (currentType.isNullable() != desiredType.isNullable()
+            && typeFactory.createTypeWithNullability(currentType,
+                desiredType.isNullable()).equals(desiredType))
+        ? node
+        : SqlStdOperatorTable.CAST.createCall(SqlParserPos.ZERO,
+            node, SqlTypeUtil.convertTypeToSpec(desiredType));
+  }
+
   private boolean addOrExpandField(List<SqlNode> selectItems, Set<String> aliases,
-      List<Map.Entry<String, RelDataType>> types, boolean includeSystemVars,
+      List<Map.Entry<String, RelDataType>> fields, boolean includeSystemVars,
       SelectScope scope, SqlIdentifier id, RelDataTypeField field) {
     switch (field.getType().getStructKind()) {
     case PEEK_FIELDS:
@@ -586,7 +603,7 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
       expandStar(
           selectItems,
           aliases,
-          types,
+          fields,
           includeSystemVars,
           scope,
           starExp);
@@ -596,7 +613,7 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
       addToSelectList(
           selectItems,
           aliases,
-          types,
+          fields,
           id,
           scope,
           includeSystemVars);
@@ -687,6 +704,10 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
       SqlValidatorScope scope,
       SqlParserPos pos,
       Collection<SqlMoniker> hintList) {
+    if (node == null) {
+      // This can happen in cases like "select * _suggest_", so from clause is absent
+      return;
+    }
     final SqlValidatorNamespace ns = getNamespace(node);
     if (ns.isWrapperFor(IdentifierNamespace.class)) {
       IdentifierNamespace idNs = ns.unwrap(IdentifierNamespace.class);
@@ -785,11 +806,13 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
       }
       if (ns != null) {
         RelDataType rowType = ns.getRowType();
-        for (RelDataTypeField field : rowType.getFieldList()) {
-          hintList.add(
-              new SqlMonikerImpl(
-                  field.getName(),
-                  SqlMonikerType.COLUMN));
+        if (rowType.isStruct()) {
+          for (RelDataTypeField field : rowType.getFieldList()) {
+            hintList.add(
+                new SqlMonikerImpl(
+                    field.getName(),
+                    SqlMonikerType.COLUMN));
+          }
         }
       }
 
@@ -924,6 +947,11 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
     }
 
     validateNamespace(ns, targetRowType);
+    switch (node.getKind()) {
+    case EXTEND:
+      // Until we have a dedicated namespace for EXTEND
+      deriveType(scope, node);
+    }
     if (node == top) {
       validateModality(node);
     }
@@ -1062,6 +1090,17 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
     }
   }
 
+  private void handleOffsetFetch(SqlNode offset, SqlNode fetch) {
+    if (offset instanceof SqlDynamicParam) {
+      setValidatedNodeType(offset,
+          typeFactory.createSqlType(SqlTypeName.INTEGER));
+    }
+    if (fetch instanceof SqlDynamicParam) {
+      setValidatedNodeType(fetch,
+          typeFactory.createSqlType(SqlTypeName.INTEGER));
+    }
+  }
+
   /**
    * Performs expression rewrites which are always used unconditionally. These
    * rewrites massage the expression tree into a standard form so that the
@@ -1159,6 +1198,7 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
 
     case ORDER_BY: {
       SqlOrderBy orderBy = (SqlOrderBy) node;
+      handleOffsetFetch(orderBy.offset, orderBy.fetch);
       if (orderBy.query instanceof SqlSelect) {
         SqlSelect select = (SqlSelect) orderBy.query;
 
@@ -1531,6 +1571,9 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
     if (original != null && original != node) {
       return getValidatedNodeType(original);
     }
+    if (node instanceof SqlIdentifier) {
+      return getCatalogReader().getNamedType((SqlIdentifier) node);
+    }
     return null;
   }
 
@@ -1545,8 +1588,8 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
    */
   @SuppressWarnings("deprecation")
   public final void setValidatedNodeType(SqlNode node, RelDataType type) {
-    Preconditions.checkNotNull(type);
-    Preconditions.checkNotNull(node);
+    Objects.requireNonNull(type);
+    Objects.requireNonNull(node);
     if (type.equals(unknownType)) {
       // don't set anything until we know what it is, and don't overwrite
       // a known type with the unknown type
@@ -1562,8 +1605,8 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
   public RelDataType deriveType(
       SqlValidatorScope scope,
       SqlNode expr) {
-    Preconditions.checkNotNull(scope);
-    Preconditions.checkNotNull(expr);
+    Objects.requireNonNull(scope);
+    Objects.requireNonNull(expr);
 
     // if we already know the type, no need to re-derive
     RelDataType type = nodeToTypeMap.get(expr);
@@ -1590,9 +1633,7 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
       SqlNode operand) {
     DeriveTypeVisitor v = new DeriveTypeVisitor(scope);
     final RelDataType type = operand.accept(v);
-    // After Guava 17, use Verify.verifyNotNull for Preconditions.checkNotNull
-    Bug.upgrade("guava-17");
-    return Preconditions.checkNotNull(scope.nullifyType(operand, type));
+    return Objects.requireNonNull(scope.nullifyType(operand, type));
   }
 
   public RelDataType deriveConstructorType(
@@ -1816,7 +1857,7 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
   }
 
   public void setDefaultNullCollation(NullCollation nullCollation) {
-    this.nullCollation = Preconditions.checkNotNull(nullCollation);
+    this.nullCollation = Objects.requireNonNull(nullCollation);
   }
 
   public NullCollation getDefaultNullCollation() {
@@ -1854,8 +1895,8 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
 
     // parse input query
     SqlNode expr = call.getTableRef();
-    SqlNode newExpr = registerFrom(usingScope, matchRecognizeScope, expr,
-        expr, null, null, forceNullable);
+    SqlNode newExpr = registerFrom(usingScope, matchRecognizeScope, true, expr,
+        expr, null, null, forceNullable, false);
     if (expr != newExpr) {
       call.setOperand(0, newExpr);
     }
@@ -1906,6 +1947,8 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
    * @param parentScope   Parent scope which this scope turns to in order to
    *                      resolve objects
    * @param usingScope    Scope whose child list this scope should add itself to
+   * @param register      Whether to register this scope as a child of
+   *                      {@code usingScope}
    * @param node          Node which namespace is based on
    * @param enclosingNode Outermost node for namespace, including decorations
    *                      such as alias and sample clause
@@ -1913,16 +1956,21 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
    * @param extendList    Definitions of extended columns
    * @param forceNullable Whether to force the type of namespace to be
    *                      nullable because it is in an outer join
+   * @param lateral       Whether LATERAL is specified, so that items to the
+   *                      left of this in the JOIN tree are visible in the
+   *                      scope
    * @return registered node, usually the same as {@code node}
    */
   private SqlNode registerFrom(
       SqlValidatorScope parentScope,
       SqlValidatorScope usingScope,
+      boolean register,
       final SqlNode node,
       SqlNode enclosingNode,
       String alias,
       SqlNodeList extendList,
-      boolean forceNullable) {
+      boolean forceNullable,
+      final boolean lateral) {
     final SqlKind kind = node.getKind();
 
     SqlNode expr;
@@ -1967,6 +2015,21 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
       }
     }
 
+    if (lateral) {
+      SqlValidatorScope s = usingScope;
+      while (s instanceof JoinScope) {
+        s = ((JoinScope) s).getUsingScope();
+      }
+      final SqlNode node2 = s != null ? s.getNode() : node;
+      final TableScope tableScope = new TableScope(parentScope, node2);
+      if (usingScope instanceof ListScope) {
+        for (ScopeChild child : ((ListScope) usingScope).children) {
+          tableScope.addChild(child.namespace, child.name, child.nullable);
+        }
+      }
+      parentScope = tableScope;
+    }
+
     SqlCall call;
     SqlNode operand;
     SqlNode newOperand;
@@ -1977,27 +2040,26 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
       if (alias == null) {
         alias = call.operand(1).toString();
       }
-      SqlValidatorScope usingScope2 = usingScope;
-      if (call.operandCount() > 2) {
-        usingScope2 = null;
-      }
+      final boolean needAlias = call.operandCount() > 2;
       expr = call.operand(0);
       newExpr =
           registerFrom(
               parentScope,
-              usingScope2,
+              usingScope,
+              !needAlias,
               expr,
               enclosingNode,
               alias,
               extendList,
-              forceNullable);
+              forceNullable,
+              lateral);
       if (newExpr != expr) {
         call.setOperand(0, newExpr);
       }
 
       // If alias has a column list, introduce a namespace to translate
-      // column names.
-      if (call.operandCount() > 2) {
+      // column names. We skipped registering it just now.
+      if (needAlias) {
         registerNamespace(
             usingScope,
             alias,
@@ -2016,11 +2078,13 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
           registerFrom(
               parentScope,
               usingScope,
+              true,
               expr,
               enclosingNode,
               alias,
               extendList,
-              forceNullable);
+              forceNullable,
+              lateral);
       if (newExpr != expr) {
         call.setOperand(0, newExpr);
       }
@@ -2052,29 +2116,27 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
           registerFrom(
               parentScope,
               joinScope,
+              true,
               left,
               left,
               null,
               null,
-              forceLeftNullable);
+              forceLeftNullable,
+              lateral);
       if (newLeft != left) {
         join.setLeft(newLeft);
       }
-      final SqlValidatorScope rightParentScope;
-      if (rightIsLateral) {
-        rightParentScope = joinScope;
-      } else {
-        rightParentScope = parentScope;
-      }
       final SqlNode newRight =
           registerFrom(
-              rightParentScope,
+              parentScope,
               joinScope,
+              true,
               right,
               right,
               null,
               null,
-              forceRightNullable);
+              forceRightNullable,
+              lateral);
       if (newRight != right) {
         join.setRight(newRight);
       }
@@ -2089,7 +2151,8 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
           new IdentifierNamespace(
               this, id, extendList, enclosingNode,
               parentScope);
-      registerNamespace(usingScope, alias, newNs, forceNullable);
+      registerNamespace(register ? usingScope : null, alias, newNs,
+          forceNullable);
       if (tableScope == null) {
         tableScope = new TableScope(parentScope, node);
       }
@@ -2100,50 +2163,55 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
       return newNode;
 
     case LATERAL:
-      if (tableScope != null) {
-        tableScope.meetLateral();
-      }
       return registerFrom(
           parentScope,
           usingScope,
+          register,
           ((SqlCall) node).operand(0),
           enclosingNode,
           alias,
           extendList,
-          forceNullable);
+          forceNullable,
+          true);
 
     case COLLECTION_TABLE:
       call = (SqlCall) node;
       operand = call.operand(0);
       newOperand =
           registerFrom(
-              tableScope == null ? parentScope : tableScope,
+              parentScope,
               usingScope,
+              register,
               operand,
               enclosingNode,
               alias,
               extendList,
-              forceNullable);
+              forceNullable, lateral);
       if (newOperand != operand) {
         call.setOperand(0, newOperand);
       }
       scopes.put(node, parentScope);
       return newNode;
 
+    case UNNEST:
+      if (!lateral) {
+        return registerFrom(parentScope, usingScope, register, node,
+            enclosingNode, alias, extendList, forceNullable, true);
+      }
+      // fall through
     case SELECT:
     case UNION:
     case INTERSECT:
     case EXCEPT:
     case VALUES:
     case WITH:
-    case UNNEST:
     case OTHER_FUNCTION:
       if (alias == null) {
         alias = deriveAlias(node, nextGeneratedId++);
       }
       registerQuery(
           parentScope,
-          usingScope,
+          register ? usingScope : null,
           node,
           enclosingNode,
           alias,
@@ -2162,18 +2230,20 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
           registerFrom(
               parentScope,
               overScope,
+              true,
               operand,
               enclosingNode,
               alias,
               extendList,
-              forceNullable);
+              forceNullable,
+              lateral);
       if (newOperand != operand) {
         call.setOperand(0, newOperand);
       }
 
       for (ScopeChild child : overScope.children) {
-        registerNamespace(usingScope, child.name, child.namespace,
-            forceNullable);
+        registerNamespace(register ? usingScope : null, child.name,
+            child.namespace, forceNullable);
       }
 
       return newNode;
@@ -2182,11 +2252,13 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
       final SqlCall extend = (SqlCall) node;
       return registerFrom(parentScope,
           usingScope,
+          true,
           extend.getOperandList().get(0),
           extend,
           alias,
           (SqlNodeList) extend.getOperandList().get(1),
-          forceNullable);
+          forceNullable,
+          lateral);
 
     default:
       throw Util.unexpected(kind);
@@ -2287,8 +2359,8 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
       String alias,
       boolean forceNullable,
       boolean checkUpdate) {
-    Preconditions.checkNotNull(node);
-    Preconditions.checkNotNull(enclosingNode);
+    Objects.requireNonNull(node);
+    Objects.requireNonNull(enclosingNode);
     Preconditions.checkArgument(usingScope == null || alias != null);
 
     SqlCall call;
@@ -2321,10 +2393,12 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
             registerFrom(
                 parentScope,
                 selectScope,
+                true,
                 from,
                 from,
                 null,
                 null,
+                false,
                 false);
         if (newFrom != from) {
           select.setFrom(newFrom);
@@ -2653,33 +2727,34 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
       return true;
     }
     // Also when nested window aggregates are present
-    for (SqlNode node : select.getSelectList()) {
-      if (node instanceof SqlCall) {
-        SqlCall call = (SqlCall) overFinder.findAgg(node);
-        if (call != null
-            && call.getOperator().getKind() == SqlKind.OVER
-            && call.getOperandList().size() != 0) {
-          if (call.operand(0) instanceof SqlCall
-              && isNestedAggregateWindow((SqlCall) call.operand(0))) {
-            return true;
-          }
-        }
+    for (SqlCall call : overFinder.findAll(select.getSelectList())) {
+      assert call.getKind() == SqlKind.OVER;
+      if (isNestedAggregateWindow(call.operand(0))) {
+        return true;
+      }
+      if (isOverAggregateWindow(call.operand(1))) {
+        return true;
       }
     }
     return false;
   }
 
-  protected boolean isNestedAggregateWindow(SqlCall windowFunction) {
+  protected boolean isNestedAggregateWindow(SqlNode node) {
     AggFinder nestedAggFinder =
         new AggFinder(opTab, false, false, false, aggFinder);
-    return nestedAggFinder.findAgg(windowFunction) != null;
+    return nestedAggFinder.findAgg(node) != null;
+  }
+
+  protected boolean isOverAggregateWindow(SqlNode node) {
+    return aggFinder.findAgg(node) != null;
   }
 
   /** Returns the parse tree node (GROUP BY, HAVING, or an aggregate function
-   * call) that causes {@code select} to be an aggregate query, or null if it is
-   * not an aggregate query.
+   * call) that causes {@code select} to be an aggregate query, or null if it
+   * is not an aggregate query.
    *
-   * <p>The node is useful context for error messages. */
+   * <p>The node is useful context for error messages,
+   * but you cannot assume that the node is the only aggregate function. */
   protected SqlNode getAggregate(SqlSelect select) {
     SqlNode node = select.getGroup();
     if (node != null) {
@@ -2692,6 +2767,8 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
     return getAgg(select);
   }
 
+  /** If there is at least one call to an aggregate function, returns the
+   * first. */
   private SqlNode getAgg(SqlSelect select) {
     final SelectScope selectScope = getRawSelectScope(select);
     if (selectScope != null) {
@@ -2937,7 +3014,7 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
       SqlNode node,
       RelDataType targetRowType,
       SqlValidatorScope scope) {
-    Preconditions.checkNotNull(targetRowType);
+    Objects.requireNonNull(targetRowType);
     switch (node.getKind()) {
     case AS:
       validateFrom(
@@ -2954,6 +3031,9 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
     case OVER:
       validateOver((SqlCall) node, scope);
       break;
+    case UNNEST:
+      validateUnnest((SqlCall) node, scope, targetRowType);
+      break;
     default:
       validateQuery(node, scope, targetRowType);
       break;
@@ -2966,6 +3046,14 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
 
   protected void validateOver(SqlCall call, SqlValidatorScope scope) {
     throw new AssertionError("OVER unexpected in this context");
+  }
+
+  protected void validateUnnest(SqlCall call, SqlValidatorScope scope, RelDataType targetRowType) {
+    for (int i = 0; i < call.operandCount(); i++) {
+      SqlNode expandedItem = expand(call.operand(i), scope);
+      call.setOperand(i, expandedItem);
+    }
+    validateQuery(call, scope, targetRowType);
   }
 
   private void checkRollUpInUsing(SqlIdentifier identifier, SqlNode leftOrRight) {
@@ -3012,8 +3100,8 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
 
       // Parser ensures that using clause is not empty.
       Preconditions.checkArgument(list.size() > 0, "Empty USING clause");
-      for (int i = 0; i < list.size(); i++) {
-        SqlIdentifier id = (SqlIdentifier) list.get(i);
+      for (SqlNode node : list) {
+        SqlIdentifier id = (SqlIdentifier) node;
         final RelDataType leftColType = validateUsingCol(id, left);
         final RelDataType rightColType = validateUsingCol(id, right);
         if (!SqlTypeUtil.isComparable(leftColType, rightColType)) {
@@ -3040,13 +3128,12 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
       // fields that occur more than once on either side.
       final RelDataType leftRowType = getNamespace(left).getRowType();
       final RelDataType rightRowType = getNamespace(right).getRowType();
+      final SqlNameMatcher nameMatcher = catalogReader.nameMatcher();
       List<String> naturalColumnNames =
-          SqlValidatorUtil.deriveNaturalJoinColumnList(
-              leftRowType,
-              rightRowType);
+          SqlValidatorUtil.deriveNaturalJoinColumnList(nameMatcher,
+              leftRowType, rightRowType);
 
       // Check compatibility of the chosen columns.
-      final SqlNameMatcher nameMatcher = catalogReader.nameMatcher();
       for (String name : naturalColumnNames) {
         final RelDataType leftColType =
             nameMatcher.field(leftRowType, name).getType();
@@ -3063,6 +3150,12 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
     // Which join types require/allow a ON/USING condition, or allow
     // a NATURAL keyword?
     switch (joinType) {
+    case LEFT_SEMI_JOIN:
+      if (!conformance.isLiberal()) {
+        throw newValidationError(join.getJoinTypeNode(),
+            RESOURCE.dialectDoesNotSupportFeature("LEFT SEMI JOIN"));
+      }
+      // fall through
     case INNER:
     case LEFT:
     case RIGHT:
@@ -3122,7 +3215,7 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
       final SqlNameMatcher nameMatcher = catalogReader.nameMatcher();
       final RelDataTypeField field = nameMatcher.field(rowType, name);
       if (field != null) {
-        if (Collections.frequency(rowType.getFieldNames(), name) > 1) {
+        if (nameMatcher.frequency(rowType.getFieldNames(), name) > 1) {
           throw newValidationError(id,
               RESOURCE.columnInUsingNotUnique(id.toString()));
         }
@@ -3143,7 +3236,6 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
       SqlSelect select,
       RelDataType targetRowType) {
     assert targetRowType != null;
-
     // Namespace is either a select namespace or a wrapper around one.
     final SelectNamespace ns =
         getNamespace(select).unwrap(SelectNamespace.class);
@@ -3180,12 +3272,7 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
     final SelectScope fromScope = (SelectScope) getFromScope(select);
     List<String> names = fromScope.getChildNames();
     if (!catalogReader.nameMatcher().isCaseSensitive()) {
-      names = Lists.transform(names,
-          new Function<String, String>() {
-            public String apply(String s) {
-              return s.toUpperCase(Locale.ROOT);
-            }
-          });
+      names = Lists.transform(names, s -> s.toUpperCase(Locale.ROOT));
     }
     final int duplicateAliasOrdinal = Util.firstDuplicate(names);
     if (duplicateAliasOrdinal >= 0) {
@@ -3207,6 +3294,7 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
     validateGroupClause(select);
     validateHavingClause(select);
     validateWindowClause(select);
+    handleOffsetFetch(select.getOffset(), select.getFetch());
 
     // Validate the SELECT clause late, because a select item might
     // depend on the GROUP BY list, or the window function might reference
@@ -3275,7 +3363,7 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
 
   private SqlNode stripDot(SqlNode node) {
     if (node != null && node.getKind() == SqlKind.DOT) {
-      return ((SqlCall) node).operand(0);
+      return stripDot(((SqlCall) node).operand(0));
     }
     return node;
   }
@@ -3426,17 +3514,8 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
               catalogReader.nameMatcher().isCaseSensitive());
     }
 
-    String schemaName = names.get(0);
-    String tableName = names.get(1);
-
-    CalciteSchema schema = catalogReader.getRootSchema().getSubSchemaMap().get(schemaName);
-
-    if (schema == null) {
-      return null;
-    }
-
-    CalciteSchema.TableEntry entry = schema.getTable(tableName,
-            catalogReader.nameMatcher().isCaseSensitive());
+    CalciteSchema.TableEntry entry =
+        SqlValidatorUtil.getTableEntry(catalogReader, names);
 
     return entry == null ? null : entry.getTable();
   }
@@ -3517,7 +3596,7 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
 
         if (supportsModalityCount == 0) {
           if (fail) {
-            String inputs = Joiner.on(", ").join(scope.getChildNames());
+            String inputs = String.join(", ", scope.getChildNames());
             throw newValidationError(select,
                 Static.RESOURCE.cannotStreamResultsForNonStreamingInputs(inputs));
           } else {
@@ -3693,7 +3772,7 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
     // We've found a table. But is it a sequence?
     final SqlValidatorNamespace ns = resolved.only().namespace;
     if (ns instanceof TableNamespace) {
-      final Table table = ((RelOptTable) ns.getTable()).unwrap(Table.class);
+      final Table table = ns.getTable().unwrap(Table.class);
       switch (table.getJdbcTableType()) {
       case SEQUENCE:
       case TEMPORARY_SEQUENCE:
@@ -3727,7 +3806,7 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
       }
     }
     final SqlValidatorScope orderScope = getOrderScope(select);
-    Preconditions.checkNotNull(orderScope != null);
+    Objects.requireNonNull(orderScope);
 
     List<SqlNode> expandList = new ArrayList<>();
     for (SqlNode orderItem : orderList) {
@@ -3945,7 +4024,7 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
     // Validate SELECT list. Expand terms of the form "*" or "TABLE.*".
     final SqlValidatorScope selectScope = getSelectScope(select);
     final List<SqlNode> expandedSelectItems = new ArrayList<>();
-    final Set<String> aliases = Sets.newHashSet();
+    final Set<String> aliases = new HashSet<>();
     final List<Map.Entry<String, RelDataType>> fieldList = new ArrayList<>();
 
     for (int i = 0; i < selectItems.size(); i++) {
@@ -3993,7 +4072,6 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
       validateExpr(selectItem, selectScope);
     }
 
-    assert fieldList.size() >= aliases.size();
     return typeFactory.createStructType(fieldList);
   }
 
@@ -4086,11 +4164,11 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
       return baseRowType;
     }
     List<RelDataTypeField> targetFields = baseRowType.getFieldList();
-    final List<Map.Entry<String, RelDataType>> types = new ArrayList<>();
+    final List<Map.Entry<String, RelDataType>> fields = new ArrayList<>();
     if (append) {
       for (RelDataTypeField targetField : targetFields) {
-        types.add(
-            Pair.of(SqlUtil.deriveAliasFromOrdinal(types.size()),
+        fields.add(
+            Pair.of(SqlUtil.deriveAliasFromOrdinal(fields.size()),
                 targetField.getType()));
       }
     }
@@ -4110,9 +4188,9 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
         throw newValidationError(id,
             RESOURCE.duplicateTargetColumn(targetField.getName()));
       }
-      types.add(targetField);
+      fields.add(targetField);
     }
-    return typeFactory.createStructType(types);
+    return typeFactory.createStructType(fields);
   }
 
   public void validateInsert(SqlInsert insert) {
@@ -4154,8 +4232,8 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
     final RelDataType logicalSourceRowType =
         getLogicalSourceRowType(sourceRowType, insert);
 
-    checkFieldCount(insert.getTargetTable(), table, logicalSourceRowType,
-        logicalTargetRowType);
+    checkFieldCount(insert.getTargetTable(), table, source,
+        logicalSourceRowType, logicalTargetRowType);
 
     checkTypeAssignment(logicalSourceRowType, logicalTargetRowType, insert);
 
@@ -4260,10 +4338,8 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
     }
   }
 
-  private void checkFieldCount(
-      SqlNode node,
-      SqlValidatorTable table,
-      RelDataType logicalSourceRowType,
+  private void checkFieldCount(SqlNode node, SqlValidatorTable table,
+      SqlNode source, RelDataType logicalSourceRowType,
       RelDataType logicalTargetRowType) {
     final int sourceFieldCount = logicalSourceRowType.getFieldCount();
     final int targetFieldCount = logicalTargetRowType.getFieldCount();
@@ -4277,19 +4353,61 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
           public RexBuilder getRexBuilder() {
             return new RexBuilder(typeFactory);
           }
+
+          public RexNode convertExpression(SqlNode e) {
+            throw new UnsupportedOperationException();
+          }
         };
+    final List<ColumnStrategy> strategies =
+        table.unwrap(RelOptTable.class).getColumnStrategies();
     for (final RelDataTypeField field : table.getRowType().getFieldList()) {
-      if (!field.getType().isNullable()) {
-        final RelDataTypeField targetField =
-            logicalTargetRowType.getField(field.getName(), true, false);
-        if (targetField == null
-            && !table.columnHasDefaultValue(table.getRowType(),
-                field.getIndex(), rexBuilder)) {
+      final RelDataTypeField targetField =
+          logicalTargetRowType.getField(field.getName(), true, false);
+      switch (strategies.get(field.getIndex())) {
+      case NOT_NULLABLE:
+        assert !field.getType().isNullable();
+        if (targetField == null) {
           throw newValidationError(node,
               RESOURCE.columnNotNullable(field.getName()));
         }
+        break;
+      case NULLABLE:
+        assert field.getType().isNullable();
+        break;
+      case VIRTUAL:
+      case STORED:
+        if (targetField != null
+            && !isValuesWithDefault(source, targetField.getIndex())) {
+          throw newValidationError(node,
+              RESOURCE.insertIntoAlwaysGenerated(field.getName()));
+        }
       }
     }
+  }
+
+  /** Returns whether a query uses {@code DEFAULT} to populate a given
+   *  column. */
+  private boolean isValuesWithDefault(SqlNode source, int column) {
+    switch (source.getKind()) {
+    case VALUES:
+      for (SqlNode operand : ((SqlCall) source).getOperandList()) {
+        if (!isRowWithDefault(operand, column)) {
+          return false;
+        }
+      }
+      return true;
+    }
+    return false;
+  }
+
+  private boolean isRowWithDefault(SqlNode operand, int column) {
+    switch (operand.getKind()) {
+    case ROW:
+      final SqlCall row = (SqlCall) operand;
+      return row.getOperandList().size() >= column
+          && row.getOperandList().get(column).getKind() == SqlKind.DEFAULT;
+    }
+    return false;
   }
 
   protected RelDataType getLogicalTargetRowType(
@@ -4711,14 +4829,15 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
 
   public void setOriginal(SqlNode expr, SqlNode original) {
     // Don't overwrite the original original.
-    if (originalExprs.get(expr) == null) {
-      originalExprs.put(expr, original);
-    }
+    originalExprs.putIfAbsent(expr, original);
   }
 
   SqlValidatorNamespace lookupFieldNamespace(RelDataType rowType, String name) {
     final SqlNameMatcher nameMatcher = catalogReader.nameMatcher();
     final RelDataTypeField field = nameMatcher.field(rowType, name);
+    if (field == null) {
+      return null;
+    }
     return new FieldNamespace(this, field.getType());
   }
 
@@ -4960,9 +5079,7 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
 
   private void validateDefinitions(SqlMatchRecognize mr,
       MatchRecognizeScope scope) {
-    final Set<String> aliases = catalogReader.nameMatcher().isCaseSensitive()
-        ? new LinkedHashSet<String>()
-        : new TreeSet<>(String.CASE_INSENSITIVE_ORDER);
+    final Set<String> aliases = catalogReader.nameMatcher().createSet();
     for (SqlNode item : mr.getPatternDefList().getList()) {
       final String alias = alias(item);
       if (!aliases.add(alias)) {
@@ -5072,7 +5189,7 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
       // "LOCALTIME", which would have been handled as a
       // SqlIdentifier.)
       throw handleUnresolvedFunction(call, (SqlFunction) operator,
-          ImmutableList.<RelDataType>of(), null);
+          ImmutableList.of(), null);
     }
 
     SqlValidatorScope operandScope = scope.getOperandScope(call);
@@ -5181,11 +5298,17 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
     // NOTE: We assume that bind variables occur in depth-first tree
     // traversal in the same order that they occurred in the SQL text.
     final List<RelDataType> types = new ArrayList<>();
+    // NOTE: but parameters on fetch/offset would be counted twice
+    // as they are counted in the SqlOrderBy call and the inner SqlSelect call
+    final Set<SqlNode> alreadyVisited = new HashSet<>();
     sqlQuery.accept(
         new SqlShuttle() {
+
           @Override public SqlNode visit(SqlDynamicParam param) {
-            RelDataType type = getValidatedNodeType(param);
-            types.add(type);
+            if (alreadyVisited.add(param)) {
+              RelDataType type = getValidatedNodeType(param);
+              types.add(type);
+            }
             return param;
           }
         });
@@ -5254,7 +5377,7 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
     InsertNamespace(SqlValidatorImpl validator, SqlInsert node,
         SqlNode enclosingNode, SqlValidatorScope parentScope) {
       super(validator, node.getTargetTable(), enclosingNode, parentScope);
-      this.node = Preconditions.checkNotNull(node);
+      this.node = Objects.requireNonNull(node);
     }
 
     public SqlInsert getNode() {
@@ -5271,7 +5394,7 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
     UpdateNamespace(SqlValidatorImpl validator, SqlUpdate node,
         SqlNode enclosingNode, SqlValidatorScope parentScope) {
       super(validator, node.getTargetTable(), enclosingNode, parentScope);
-      this.node = Preconditions.checkNotNull(node);
+      this.node = Objects.requireNonNull(node);
     }
 
     public SqlUpdate getNode() {
@@ -5288,7 +5411,7 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
     DeleteNamespace(SqlValidatorImpl validator, SqlDelete node,
         SqlNode enclosingNode, SqlValidatorScope parentScope) {
       super(validator, node.getTargetTable(), enclosingNode, parentScope);
-      this.node = Preconditions.checkNotNull(node);
+      this.node = Objects.requireNonNull(node);
     }
 
     public SqlDelete getNode() {
@@ -5305,7 +5428,7 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
     MergeNamespace(SqlValidatorImpl validator, SqlMerge node,
         SqlNode enclosingNode, SqlValidatorScope parentScope) {
       super(validator, node.getTargetTable(), enclosingNode, parentScope);
-      this.node = Preconditions.checkNotNull(node);
+      this.node = Objects.requireNonNull(node);
     }
 
     public SqlMerge getNode() {
@@ -5512,24 +5635,7 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
         return call.accept(this);
       }
       final SqlIdentifier fqId = getScope().fullyQualify(id).identifier;
-      SqlNode expandedExpr = fqId;
-      // Convert a column ref into ITEM(*, 'col_name').
-      // select col_name from (select * from dynTable)
-      // SqlIdentifier "col_name" would be resolved to a dynamic star field in dynTable's rowType.
-      // Expand such SqlIdentifier to ITEM operator.
-      if (DynamicRecordType.isDynamicStarColName(Util.last(fqId.names))
-          && !DynamicRecordType.isDynamicStarColName(Util.last(id.names))) {
-        SqlNode[] inputs = new SqlNode[2];
-        inputs[0] = fqId;
-        inputs[1] = SqlLiteral.createCharString(
-          Util.last(id.names),
-          id.getParserPosition());
-        SqlBasicCall item_call = new SqlBasicCall(
-            SqlStdOperatorTable.ITEM,
-            inputs,
-            id.getParserPosition());
-        expandedExpr = item_call;
-      }
+      SqlNode expandedExpr = expandDynamicStar(id, fqId);
       validator.setOriginal(expandedExpr, id);
       return expandedExpr;
     }
@@ -5550,6 +5656,24 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
       final SqlNode result = argHandler.result();
       validator.setOriginal(result, call);
       return result;
+    }
+
+    protected SqlNode expandDynamicStar(SqlIdentifier id, SqlIdentifier fqId) {
+      if (DynamicRecordType.isDynamicStarColName(Util.last(fqId.names))
+          && !DynamicRecordType.isDynamicStarColName(Util.last(id.names))) {
+        // Convert a column ref into ITEM(*, 'col_name')
+        // for a dynamic star field in dynTable's rowType.
+        SqlNode[] inputs = new SqlNode[2];
+        inputs[0] = fqId;
+        inputs[1] = SqlLiteral.createCharString(
+            Util.last(id.names),
+            id.getParserPosition());
+        return new SqlBasicCall(
+            SqlStdOperatorTable.ITEM,
+            inputs,
+            id.getParserPosition());
+      }
+      return fqId;
     }
   }
 
@@ -5700,7 +5824,9 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
         }
         expr = stripAs(expr);
         if (expr instanceof SqlIdentifier) {
-          expr = getScope().fullyQualify((SqlIdentifier) expr).identifier;
+          SqlIdentifier sid = (SqlIdentifier) expr;
+          final SqlIdentifier fqId = getScope().fullyQualify(sid).identifier;
+          expr = expandDynamicStar(sid, fqId);
         }
         return expr;
       }
@@ -6056,6 +6182,141 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
 
     @Override public Set<String> visit(SqlDynamicParam param) {
       return ImmutableSet.of();
+    }
+  }
+
+  /** Permutation of fields in NATURAL JOIN or USING. */
+  private class Permute {
+    final List<ImmutableIntList> sources;
+    final RelDataType rowType;
+    final boolean trivial;
+
+    Permute(SqlNode from, int offset) {
+      switch (from.getKind()) {
+      case JOIN:
+        final SqlJoin join = (SqlJoin) from;
+        final Permute left = new Permute(join.getLeft(), offset);
+        final int fieldCount =
+            getValidatedNodeType(join.getLeft()).getFieldList().size();
+        final Permute right =
+            new Permute(join.getRight(), offset + fieldCount);
+        final List<String> names = usingNames(join);
+        final List<ImmutableIntList> sources = new ArrayList<>();
+        final Set<ImmutableIntList> sourceSet = new HashSet<>();
+        final RelDataTypeFactory.Builder b = typeFactory.builder();
+        if (names != null) {
+          for (String name : names) {
+            final RelDataTypeField f = left.field(name);
+            final ImmutableIntList source = left.sources.get(f.getIndex());
+            sourceSet.add(source);
+            final RelDataTypeField f2 = right.field(name);
+            final ImmutableIntList source2 = right.sources.get(f2.getIndex());
+            sourceSet.add(source2);
+            sources.add(source.appendAll(source2));
+            final boolean nullable =
+                (f.getType().isNullable()
+                    || join.getJoinType().generatesNullsOnLeft())
+                && (f2.getType().isNullable()
+                    || join.getJoinType().generatesNullsOnRight());
+            b.add(f).nullable(nullable);
+          }
+        }
+        for (RelDataTypeField f : left.rowType.getFieldList()) {
+          final ImmutableIntList source = left.sources.get(f.getIndex());
+          if (sourceSet.add(source)) {
+            sources.add(source);
+            b.add(f);
+          }
+        }
+        for (RelDataTypeField f : right.rowType.getFieldList()) {
+          final ImmutableIntList source = right.sources.get(f.getIndex());
+          if (sourceSet.add(source)) {
+            sources.add(source);
+            b.add(f);
+          }
+        }
+        rowType = b.build();
+        this.sources = ImmutableList.copyOf(sources);
+        this.trivial = left.trivial
+            && right.trivial
+            && (names == null || names.isEmpty());
+        break;
+
+      default:
+        rowType = getValidatedNodeType(from);
+        this.sources = Functions.generate(rowType.getFieldCount(),
+            i -> ImmutableIntList.of(offset + i));
+        this.trivial = true;
+      }
+    }
+
+    private RelDataTypeField field(String name) {
+      return catalogReader.nameMatcher().field(rowType, name);
+    }
+
+    /** Returns the set of field names in the join condition specified by USING
+     * or implicitly by NATURAL, de-duplicated and in order. */
+    private List<String> usingNames(SqlJoin join) {
+      switch (join.getConditionType()) {
+      case USING:
+        final ImmutableList.Builder<String> list = ImmutableList.builder();
+        final Set<String> names = catalogReader.nameMatcher().createSet();
+        for (SqlNode node : (SqlNodeList) join.getCondition()) {
+          final String name = ((SqlIdentifier) node).getSimple();
+          if (names.add(name)) {
+            list.add(name);
+          }
+        }
+        return list.build();
+      case NONE:
+        if (join.isNatural()) {
+          final RelDataType t0 = getValidatedNodeType(join.getLeft());
+          final RelDataType t1 = getValidatedNodeType(join.getRight());
+          return SqlValidatorUtil.deriveNaturalJoinColumnList(
+              catalogReader.nameMatcher(), t0, t1);
+        }
+      }
+      return null;
+    }
+
+    /** Moves fields according to the permutation. */
+    public void permute(List<SqlNode> selectItems,
+        List<Map.Entry<String, RelDataType>> fields) {
+      if (trivial) {
+        return;
+      }
+
+      final List<SqlNode> oldSelectItems = ImmutableList.copyOf(selectItems);
+      selectItems.clear();
+      final List<Map.Entry<String, RelDataType>> oldFields =
+          ImmutableList.copyOf(fields);
+      fields.clear();
+      for (ImmutableIntList source : sources) {
+        final int p0 = source.get(0);
+        Map.Entry<String, RelDataType> field = oldFields.get(p0);
+        final String name = field.getKey();
+        RelDataType type = field.getValue();
+        SqlNode selectItem = oldSelectItems.get(p0);
+        for (int p1 : Util.skip(source)) {
+          final Map.Entry<String, RelDataType> field1 = oldFields.get(p1);
+          final SqlNode selectItem1 = oldSelectItems.get(p1);
+          final RelDataType type1 = field1.getValue();
+          // output is nullable only if both inputs are
+          final boolean nullable = type.isNullable() && type1.isNullable();
+          final RelDataType type2 =
+              SqlTypeUtil.leastRestrictiveForComparison(typeFactory, type,
+                  type1);
+          selectItem =
+              SqlStdOperatorTable.AS.createCall(SqlParserPos.ZERO,
+                  SqlStdOperatorTable.COALESCE.createCall(SqlParserPos.ZERO,
+                      maybeCast(selectItem, type, type2),
+                      maybeCast(selectItem1, type1, type2)),
+                  new SqlIdentifier(name, SqlParserPos.ZERO));
+          type = typeFactory.createTypeWithNullability(type2, nullable);
+        }
+        fields.add(Pair.of(name, type));
+        selectItems.add(selectItem);
+      }
     }
   }
 
