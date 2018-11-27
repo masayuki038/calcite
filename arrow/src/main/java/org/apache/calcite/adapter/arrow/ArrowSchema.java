@@ -7,8 +7,8 @@ import org.apache.arrow.memory.RootAllocator;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.vector.UInt4Vector;
 import org.apache.arrow.vector.VectorSchemaRoot;
-import org.apache.arrow.vector.file.ArrowFileReader;
-import org.apache.arrow.vector.file.SeekableReadChannel;
+import org.apache.arrow.vector.ipc.ArrowFileReader;
+import org.apache.arrow.vector.ipc.SeekableReadChannel;
 import org.apache.arrow.vector.util.ByteArrayReadableSeekableByteChannel;
 
 import java.io.File;

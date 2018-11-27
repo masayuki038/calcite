@@ -25,7 +25,7 @@ public class ArrowToEnumerableEnumerator implements Enumerator {
         Object[] current = new Object[fieldSize];
         for (int i = 0; i < fieldSize; i++) {
             FieldVector vector = container.getFieldVector(rootIndex, i);
-            current[i] = vector.getAccessor().getObject(vectorIndex);
+            current[i] = vector.getObject(vectorIndex);
         }
         return current;
     }
@@ -33,13 +33,12 @@ public class ArrowToEnumerableEnumerator implements Enumerator {
     @Override
     public boolean moveNext() {
         UInt4Vector selectionVector = container.selectionVector();
-        ValueVector.Accessor accessor = selectionVector.getAccessor();
-        if (accessor.getValueCount() > 0) {
-            if (selectionVectorIndex >= accessor.getValueCount() ) {
+        if (selectionVector.getValueCount() > 0) {
+            if (selectionVectorIndex >= selectionVector.getValueCount() ) {
                 return false;
             }
 
-            int index = (int)accessor.getObject(selectionVectorIndex++);
+            int index = (int)selectionVector.getObject(selectionVectorIndex++);
             rootIndex = index & 0xffff0000;
             vectorIndex = index & 0x0000ffff;
 

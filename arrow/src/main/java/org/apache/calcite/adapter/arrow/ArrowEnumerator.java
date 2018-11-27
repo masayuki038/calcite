@@ -77,10 +77,10 @@ public class ArrowEnumerator implements Enumerator<Object>, VectorSchemaRootCont
 
     private Object getObject(int fieldIndex) {
         FieldVector fieldVector = this.vectorSchemaRoots[this.index].getFieldVectors().get(fieldIndex);
-        if (fieldVector.getAccessor().getValueCount() <= this.currentPos) {
+        if (fieldVector.getValueCount() <= this.currentPos) {
             return "NULL";
         }
-        return fieldVector.getAccessor().getObject(this.currentPos);
+        return fieldVector.getObject(this.currentPos);
     }
 
     @Override

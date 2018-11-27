@@ -77,8 +77,6 @@ public class ArrowFilter extends Calc implements ArrowRel {
         filterBody.add(Expressions.statement(Expressions.call(selectionVector, "clear", NO_PARAMS)));
         filterBody.add(Expressions.statement(Expressions.call(selectionVector, "allocateNew", NO_PARAMS)));
 
-        Expression mutator = filterBody.append(
-                "mutator", Expressions.call(selectionVector, "getMutator", NO_PARAMS));
         Expression getVectorSchemaRootCount = Expressions.call(input, "getVectorSchemaRootCount", NO_PARAMS);
         ParameterExpression i = Expressions.parameter(int.class, "i");
         DeclarationStatement declareI = Expressions.declare(0, i, Expressions.constant(0));
@@ -103,12 +101,12 @@ public class ArrowFilter extends Calc implements ArrowRel {
 
         Node selectionVectorSet = Expressions.block(
                 Expressions.statement(
-                        Expressions.call(mutator, "set", Expressions.postIncrementAssign(index), value)));
+                        Expressions.call(selectionVector, "set", Expressions.postIncrementAssign(index), value)));
         ConditionalStatement found = Expressions.ifThen(where, selectionVectorSet);
 
         Statement jFor = Expressions.for_(declareJ, jLessThan, Expressions.preIncrementAssign(j), found);
         filterBody.add(Expressions.for_(declareI, iLessThan, Expressions.preIncrementAssign(i), jFor));
-        filterBody.add(Expressions.statement(Expressions.call(mutator, "setValueCount", index)));
+        filterBody.add(Expressions.statement(Expressions.call(selectionVector, "setValueCount", index)));
         filterBody.add(Expressions.return_(null, input));
 
         final Expression body =

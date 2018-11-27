@@ -179,10 +179,7 @@ public class ArrowRexToLixTranslator extends RexToLixTranslator {
             Expression call1 = Expressions.call(container, "getFieldVector", paramList);
             final Expression fieldVector = list.append("fieldVector", call1);
 
-            Expression call2 = Expressions.call(fieldVector, "getAccessor", NO_PARAMS);
-            final Expression accessor = list.append("accessor", call2);
-
-            Expression call3 = Expressions.call(accessor, "getObject", Arrays.asList(Expressions.parameter(int.class, "j")));
+            Expression call3 = Expressions.call(fieldVector, "getObject", Arrays.asList(Expressions.parameter(int.class, "j")));
             final Expression value = list.append("value", call3);
             Type fieldType = physType.fieldClass(index);
             return RexToLixTranslator.convert(value, value.getType(), fieldType);
