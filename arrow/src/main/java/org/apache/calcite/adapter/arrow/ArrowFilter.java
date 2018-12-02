@@ -88,7 +88,7 @@ public class ArrowFilter extends Calc implements ArrowRel {
         DeclarationStatement declareJ = Expressions.declare(0, j, Expressions.constant(0));
         BinaryExpression jLessThan = Expressions.lessThan(j, rowCount);
 
-        Expression where = ArrowRexToLixTranslator.translateCondition(
+        Expression where = RexToLixTranslator.translateCondition(
                 program,
                 typeFactory,
                 filterBody,
