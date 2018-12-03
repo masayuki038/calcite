@@ -45,8 +45,8 @@ public class ArrowTable extends AbstractTable implements QueryableTable, Transla
     return deduceRowType(this.vectorSchemaRoots[0], (JavaTypeFactory) typeFactory);
   }
 
-  public ArrowProcessor project(DataContext root, final int[] fields) {
-    return new ArrowProjectProcessor(new VectorSchemaRootContainerImpl(vectorSchemaRoots, selectionVector)) {
+  public ArrowProcedure project(DataContext root, final int[] fields) {
+    return new ArrowProjectProcedure(new VectorSchemaRootContainerImpl(vectorSchemaRoots, selectionVector)) {
       @Override
       public int[] getProjectedIndexes() {
         return fields;

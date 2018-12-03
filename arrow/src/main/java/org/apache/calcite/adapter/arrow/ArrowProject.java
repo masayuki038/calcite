@@ -77,10 +77,10 @@ public class ArrowProject extends Project implements ArrowRel {
       builder.append(
         "inputEnumerable", result.block, false);
 
-    ParameterExpression previous = new ParameterExpression(0, ArrowProcessor.class, result.variableName);
+    ParameterExpression previous = new ParameterExpression(0, ArrowProcedure.class, result.variableName);
     Expression arrowProjectEnumerator = Expressions.new_(
-      ArrowProjectProcessor.class,
-      Arrays.asList(Expressions.call(previous, "run", NO_PARAMS)),
+      ArrowProjectProcedure.class,
+      Arrays.asList(Expressions.call(previous, "execute", NO_PARAMS)),
       Expressions.list(getProjectedIndexes));
 
     String variableName = "e" + arrowImplementor.getAndIncrementSuffix();

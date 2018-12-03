@@ -56,7 +56,7 @@ public class ArrowFilter extends Calc implements ArrowRel {
 
     final Type arrowFilterProcessor =
       Types.of(
-        ArrowFilterProcessor.class, outputJavaType);
+        ArrowFilterProcedure.class, outputJavaType);
 
     final Expression inputEnumerator = builder.append(
       "inputEnumerator", result.block, false);
@@ -68,7 +68,7 @@ public class ArrowFilter extends Calc implements ArrowRel {
       new RexSimplify(rexBuilder, predicates, false, RexUtil.EXECUTOR);
     final RexProgram program = this.program.normalize(rexBuilder, simplify);
 
-    Method runMethod = Types.lookupMethod(ArrowFilterProcessor.class, "run");
+    Method runMethod = Types.lookupMethod(ArrowFilterProcedure.class, "execute");
     ParameterExpression input = Expressions.parameter(0, VectorSchemaRootContainer.class, "input");
 
     BlockBuilder filterBody = new BlockBuilder();
@@ -115,7 +115,7 @@ public class ArrowFilter extends Calc implements ArrowRel {
     final Expression body =
       Expressions.new_(
         arrowFilterProcessor,
-        Arrays.asList(Expressions.call(inputEnumerator, "run", NO_PARAMS)),
+        Arrays.asList(Expressions.call(inputEnumerator, "execute", NO_PARAMS)),
         Expressions.list(
           EnumUtils.overridingMethodDecl(
             runMethod,

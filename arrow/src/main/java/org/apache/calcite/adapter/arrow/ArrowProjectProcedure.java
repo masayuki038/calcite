@@ -10,14 +10,14 @@ import java.util.List;
 /**
  * Enumerator for Projection
  */
-public abstract class ArrowProjectProcessor extends AbstractArrowProcessor {
+public abstract class ArrowProjectProcedure extends AbstractArrowProcedure {
 
-  public ArrowProjectProcessor(VectorSchemaRootContainer input) {
+  public ArrowProjectProcedure(VectorSchemaRootContainer input) {
     super(input);
   }
 
   @Override
-  public VectorSchemaRootContainer run() {
+  public VectorSchemaRootContainer execute() {
     return new VectorSchemaRootContainerImpl(getVectorSchemaRoots(), input.selectionVector());
   }
 

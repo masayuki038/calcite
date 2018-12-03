@@ -51,7 +51,7 @@ public class ArrowToEnumerableConverter extends ConverterImpl
     GotoStatement g = Expressions.return_(
       null, Expressions.new_(
         ArrowToEnumerableEnumerator.class,
-        Expressions.list(Expressions.call(childExp, "run", NO_PARAMS))));
+        Expressions.list(Expressions.call(childExp, "execute", NO_PARAMS))));
 
     builder.add(
       Expressions.return_(
