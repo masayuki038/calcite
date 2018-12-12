@@ -65,6 +65,7 @@ public class ArrowTableScan extends TableScan implements ArrowRel {
     planner.addRule(ArrowProjectTableScanRule.INSTANCE);
     planner.addRule(ArrowFilterTableScanRule.INSTANCE);
     planner.addRule(ArrowProjectRule.INSTANCE);
+    planner.addRule(ArrowAggregateRule.INSTANCE);
   }
 
   public Result implement(ArrowImplementor arrowImplementor, EnumerableRel.Prefer pref) {

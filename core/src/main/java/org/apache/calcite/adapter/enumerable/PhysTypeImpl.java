@@ -93,7 +93,7 @@ public class PhysTypeImpl implements PhysType {
     return new PhysTypeImpl(typeFactory, rowType, javaRowClass, format);
   }
 
-  static PhysType of(
+  public static PhysType of(
       final JavaTypeFactory typeFactory,
       Type javaRowClass) {
     final RelDataTypeFactory.Builder builder = typeFactory.builder();
