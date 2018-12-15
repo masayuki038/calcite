@@ -2,8 +2,14 @@ package org.apache.calcite.adapter.arrow;
 
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
 import org.apache.arrow.memory.RootAllocator;
 import org.apache.arrow.vector.FieldVector;
+import org.apache.arrow.vector.BigIntVector;
+import org.apache.arrow.vector.Float4Vector;
+import org.apache.arrow.vector.Float8Vector;
+import org.apache.arrow.vector.IntVector;
+import org.apache.arrow.vector.VarCharVector;
 import org.apache.calcite.adapter.enumerable.*;
 import org.apache.calcite.adapter.enumerable.impl.AggAddContextImpl;
 import org.apache.calcite.adapter.enumerable.impl.AggResultContextImpl;
@@ -37,6 +43,12 @@ import java.util.*;
 import static org.apache.calcite.adapter.arrow.EnumerableUtils.NO_PARAMS;
 
 public class ArrowAggregate extends Aggregate implements ArrowRel {
+
+  private static final ImmutableMap<Type, Type> VECTOR_TYPE_MAP = ImmutableMap.of(
+    Integer.class, org.apache.arrow.vector.IntVector.class,
+    Long.class, org.apache.arrow.vector.BigIntVector.class,
+    String.class, org.apache.arrow.vector.VarCharVector.class
+  );
 
   public ArrowAggregate(
                          RelOptCluster cluster,
@@ -171,24 +183,61 @@ public class ArrowAggregate extends Aggregate implements ArrowRel {
           initBlock.toBlock()));
 
     final BlockBuilder fieldVectorsInitBlock = new BlockBuilder();
-    fieldVectorsInitBlock.add(
-      Expressions.declare(0, "rootAllocator",
-        Expressions.new_(RootAllocator.class, Expressions.field(null, Long.class, "MAX_VALUE"))));
-    List<Integer> fieldIndexes = groupSet.asList();
-    for (int i = 0; i <  fieldIndexes.size(); i++) {
-      fieldVectorsInitBlock.add(
-        Expressions.declare(0, "name" + i,
+    DeclarationStatement rootAllocator = Expressions.declare(0, "rootAllocator",
+      Expressions.new_(RootAllocator.class, Expressions.field(null, Long.class, "MAX_VALUE")));
+    fieldVectorsInitBlock.add(rootAllocator);
+
+    List<Integer> groupKeys = groupSet.asList();
+    List<ParameterExpression> fieldNames = new ArrayList<>();
+    for (int i = 0; i < groupKeys.size(); i++) {
+      DeclarationStatement fieldName =
+        Expressions.declare(0, "groupKey" + i,
           Expressions.call(
             Expressions.variable(ArrowAggregateProcedure.class, "this"),
             "getFieldVectorName",
-            Expressions.constant(i))));
+            Expressions.constant(i)));
+      fieldVectorsInitBlock.add(fieldName);
+      fieldNames.add(fieldName.parameter);
     }
-    // TODO function の分だけFieldを作る。順番は select statement の field の並びに依る
-    // field の並びは、groupBy で生成されたコードを参考にしてとっかかりを見つける
+    for (int i = 0; i < aggs.size(); i++) {
+      String fieldName = aggs.get(i).call.getName() + i;
+      fieldVectorsInitBlock.add(
+        Expressions.declare(0, fieldName,
+          Expressions.constant(fieldName)));
+    }
+    // TODO function の分だけFieldを作る
 
-    //Expressions.declare(0, "fieldVectors", Expressions.newArrayInit(FieldVector.class, count));
+    DeclarationStatement fieldVectors = Expressions.declare(
+      0, "fieldVectors", Expressions.newArrayInit(FieldVector.class, groupKeys.size() + aggs.size()));
+    fieldVectorsInitBlock.add(fieldVectors);
 
+    int fieldVectorIndex = 0;
+    for (; fieldVectorIndex < groupKeys.size(); fieldVectorIndex++) {
+      Type vectorClazz = VECTOR_TYPE_MAP.get(keyPhysType.fieldClass(fieldVectorIndex));
+      assert (vectorClazz != null);
+      fieldVectorsInitBlock.add(
+        Expressions.assign(
+          Expressions.arrayIndex(fieldVectors.parameter, Expressions.constant(fieldVectorIndex)),
+          Expressions.new_(
+            vectorClazz,
+            fieldNames.get(fieldVectorIndex),
+            rootAllocator.parameter)));
+    }
 
+    for (AggImpState agg: aggs) {
+      Type vectorClazz = VECTOR_TYPE_MAP.get(agg.context.returnType());
+      assert (vectorClazz != null);
+      fieldVectorsInitBlock.add(
+        Expressions.assign(
+          Expressions.arrayIndex(fieldVectors.parameter, Expressions.constant(fieldVectorIndex)),
+          Expressions.new_(
+            vectorClazz,
+            Expressions.parameter(0, String.class, "a_" + fieldVectorIndex),
+            rootAllocator.parameter)));
+      fieldVectorIndex++;
+    }
+
+    fieldVectorsInitBlock.add(Expressions.return_(null, fieldVectors.parameter));
 
     // Function2<Object[], Employee, Object[]> accumulatorAdder =
     //     new Function2<Object[], Employee, Object[]>() {
