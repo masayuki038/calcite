@@ -205,7 +205,6 @@ public class ArrowAggregate extends Aggregate implements ArrowRel {
         Expressions.declare(0, fieldName,
           Expressions.constant(fieldName)));
     }
-    // TODO function の分だけFieldを作る
 
     DeclarationStatement fieldVectors = Expressions.declare(
       0, "fieldVectors", Expressions.newArrayInit(FieldVector.class, groupKeys.size() + aggs.size()));
@@ -311,34 +310,75 @@ public class ArrowAggregate extends Aggregate implements ArrowRel {
     //             return new Object[] { key, acc[0], acc[1] };
     //         }
     //     };
+//    final BlockBuilder resultBlock = new BlockBuilder();
+//    final List<Expression> results = Expressions.list();
+//    final ParameterExpression key_;
+//    if (groupCount == 0) {
+//      key_ = null;
+//    } else {
+//      final Type keyType = keyPhysType.getJavaRowType();
+//      key_ = Expressions.parameter(keyType, "key");
+//      for (int j = 0; j < groupCount; j++) {
+//        final Expression ref = keyPhysType.fieldReference(key_, j);
+//        if (getGroupType() == Group.SIMPLE) {
+//          results.add(ref);
+//        } else {
+//          results.add(
+//            Expressions.condition(
+//              keyPhysType.fieldReference(key_, groupCount + j),
+//              Expressions.constant(null),
+//              Expressions.box(ref)));
+//        }
+//      }
+//    }
+//    for (final AggImpState agg : aggs) {
+//      results.add(
+//        agg.implementor.implementResult(agg.context,
+//          new AggResultContextImpl(resultBlock, agg.call, agg.state, key_,
+//                                    keyPhysType)));
+//    }
+//    resultBlock.add(physType.record(results));
+
     final BlockBuilder resultBlock = new BlockBuilder();
-    final List<Expression> results = Expressions.list();
     final ParameterExpression key_;
+    Expression idx = Expressions.parameter(0, int.class, "idx");
     if (groupCount == 0) {
       key_ = null;
     } else {
       final Type keyType = keyPhysType.getJavaRowType();
       key_ = Expressions.parameter(keyType, "key");
-      for (int j = 0; j < groupCount; j++) {
-        final Expression ref = keyPhysType.fieldReference(key_, j);
+      for (fieldVectorIndex = 0; fieldVectorIndex < groupCount; fieldVectorIndex++) {
+        Expression groupKey = null;
         if (getGroupType() == Group.SIMPLE) {
-          results.add(ref);
+          groupKey = keyPhysType.fieldReference(key_, fieldVectorIndex);
         } else {
-          results.add(
-            Expressions.condition(
-              keyPhysType.fieldReference(key_, groupCount + j),
-              Expressions.constant(null),
-              Expressions.box(ref)));
+          groupKey = Expressions.condition(
+            keyPhysType.fieldReference(key_, groupCount + fieldVectorIndex),
+            Expressions.constant(null),
+            Expressions.box(groupKey));
         }
+        resultBlock.add(
+          Expressions.call(
+            Expressions.arrayIndex(fieldVectors.parameter, Expressions.constant(fieldVectorIndex)),
+            "set",
+            idx,
+            groupKey));
       }
     }
+
     for (final AggImpState agg : aggs) {
-      results.add(
+      Expression aggRet =
         agg.implementor.implementResult(agg.context,
-          new AggResultContextImpl(resultBlock, agg.call, agg.state, key_,
-                                    keyPhysType)));
+          new AggResultContextImpl(resultBlock, agg.call, agg.state, key_, keyPhysType));
+      resultBlock.add(
+        Expressions.call(
+          Expressions.arrayIndex(fieldVectors.parameter, Expressions.constant(fieldVectorIndex)),
+          "set",
+          idx,
+          aggRet));
+      fieldVectorIndex++;
     }
-    resultBlock.add(physType.record(results));
+
     if (getGroupType() != Group.SIMPLE) {
       final List<Expression> list = new ArrayList<>();
       for (ImmutableBitSet set : groupSets) {
