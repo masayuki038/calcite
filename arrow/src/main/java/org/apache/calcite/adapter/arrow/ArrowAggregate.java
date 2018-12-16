@@ -3,13 +3,8 @@ package org.apache.calcite.adapter.arrow;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
-import org.apache.arrow.memory.RootAllocator;
+import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.vector.FieldVector;
-import org.apache.arrow.vector.BigIntVector;
-import org.apache.arrow.vector.Float4Vector;
-import org.apache.arrow.vector.Float8Vector;
-import org.apache.arrow.vector.IntVector;
-import org.apache.arrow.vector.VarCharVector;
 import org.apache.calcite.adapter.enumerable.*;
 import org.apache.calcite.adapter.enumerable.impl.AggAddContextImpl;
 import org.apache.calcite.adapter.enumerable.impl.AggResultContextImpl;
@@ -183,9 +178,8 @@ public class ArrowAggregate extends Aggregate implements ArrowRel {
           initBlock.toBlock()));
 
     final BlockBuilder fieldVectorsInitBlock = new BlockBuilder();
-    DeclarationStatement rootAllocator = Expressions.declare(0, "rootAllocator",
-      Expressions.new_(RootAllocator.class, Expressions.field(null, Long.class, "MAX_VALUE")));
-    fieldVectorsInitBlock.add(rootAllocator);
+    Expression rootAllocator =
+      Expressions.parameter(0, BufferAllocator.class, "rootAllocator");
 
     List<Integer> groupKeys = groupSet.asList();
     List<ParameterExpression> fieldNames = new ArrayList<>();
@@ -220,7 +214,7 @@ public class ArrowAggregate extends Aggregate implements ArrowRel {
           Expressions.new_(
             vectorClazz,
             fieldNames.get(fieldVectorIndex),
-            rootAllocator.parameter)));
+            rootAllocator)));
     }
 
     for (AggImpState agg: aggs) {
@@ -232,11 +226,19 @@ public class ArrowAggregate extends Aggregate implements ArrowRel {
           Expressions.new_(
             vectorClazz,
             Expressions.parameter(0, String.class, "a_" + fieldVectorIndex),
-            rootAllocator.parameter)));
+            rootAllocator)));
       fieldVectorIndex++;
     }
 
     fieldVectorsInitBlock.add(Expressions.return_(null, fieldVectors.parameter));
+
+    final Expression fieldVectorsInitializer =
+      aggregateBuilder.append(
+        "fieldVectorsInitializer",
+        Expressions.lambda(
+          Function1.class,
+          fieldVectorsInitBlock.toBlock(),
+          Expressions.parameter(BufferAllocator.class, "in")));
 
     // Function2<Object[], Employee, Object[]> accumulatorAdder =
     //     new Function2<Object[], Employee, Object[]>() {
@@ -454,6 +456,7 @@ public class ArrowAggregate extends Aggregate implements ArrowRel {
             BuiltInMethod.GROUP_BY2.method,
             Expressions.list(keySelector_,
               accumulatorInitializer,
+              fieldVectorsInitializer,
               accumulatorAdder,
               resultSelector_)
               .appendIfNotNull(keyPhysType.comparer()))));

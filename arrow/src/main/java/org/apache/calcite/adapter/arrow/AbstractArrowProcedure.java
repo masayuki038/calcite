@@ -1,11 +1,17 @@
 package org.apache.calcite.adapter.arrow;
 
+import com.google.common.collect.Lists;
+import org.apache.arrow.memory.BufferAllocator;
+import org.apache.arrow.memory.RootAllocator;
+import org.apache.arrow.vector.FieldVector;
+import org.apache.arrow.vector.UInt4Vector;
+import org.apache.arrow.vector.VectorSchemaRoot;
 import org.apache.calcite.linq4j.Enumerable;
-import org.apache.calcite.linq4j.EnumerableDefaults;
 import org.apache.calcite.linq4j.Enumerator;
 import org.apache.calcite.linq4j.function.Function0;
 import org.apache.calcite.linq4j.function.Function1;
 import org.apache.calcite.linq4j.function.Function2;
+import org.apache.calcite.adapter.arrow.utils.Function4;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -25,19 +31,31 @@ abstract public class AbstractArrowProcedure<T> implements ArrowProcedure {
   }
 
   public <TKey, TAccumulate> VectorSchemaRootContainer groupBy(
-      Function1<T, TKey> keySelector,
-      Function0<TAccumulate> accumulatorInitializer,
-      Function2<TAccumulate, T, TAccumulate> accumulatorAdder,
-      Function2<TKey, TAccumulate, VectorSchemaRootContainer> resultSelector) {
-    return groupBy_(new HashMap<TKey, TAccumulate>(), null, keySelector, accumulatorInitializer, accumulatorAdder, resultSelector);
+      final Function1<T, TKey> keySelector,
+      final Function0<TAccumulate> accumulatorInitializer,
+      final Function1<BufferAllocator, FieldVector[]> fieldVectorsInitializer,
+      final Function2<TAccumulate, T, TAccumulate> accumulatorAdder,
+      final Function4<Integer, FieldVector[], TKey, TAccumulate, Void> resultSelector) {
+    return groupBy_(
+      new HashMap<TKey, TAccumulate>(),
+      null,
+      keySelector,
+      accumulatorInitializer,
+      fieldVectorsInitializer,
+      accumulatorAdder,
+      resultSelector);
   }
 
   private  <TKey, TAccumulate> VectorSchemaRootContainer groupBy_(
-      final Map<TKey, TAccumulate> map, Enumerable<T> enumerable,
-      Function1<T, TKey> keySelector,
-      Function0<TAccumulate> accumulatorInitializer,
-      Function2<TAccumulate, T, TAccumulate> accumulatorAdder,
-      final Function2<TKey, TAccumulate, VectorSchemaRootContainer> resultSelector) {
+      final Map<TKey, TAccumulate> map,
+      final Enumerable<T> enumerable,
+      final Function1<T, TKey> keySelector,
+      final Function0<TAccumulate> accumulatorInitializer,
+      final Function1<BufferAllocator, FieldVector[]> fieldVectorsInitializer,
+      final Function2<TAccumulate, T, TAccumulate> accumulatorAdder,
+      final Function4<Integer, FieldVector[], TKey, TAccumulate, Void> resultSelector) {
+    BufferAllocator allocator = new RootAllocator(Long.MAX_VALUE);
+    FieldVector[] fieldVectors = fieldVectorsInitializer.apply(allocator);
     try (Enumerator<T> os = enumerable.enumerator()) {
       while (os.moveNext()) {
         T o = os.current();
@@ -56,7 +74,20 @@ abstract public class AbstractArrowProcedure<T> implements ArrowProcedure {
         }
       }
     }
-    //return new LookupResultEnumerable<>(map, resultSelector);
-    return null;
+    return createVectorSchemaContainer(map, fieldVectors, allocator, resultSelector);
+  }
+
+  private <TKey, TAccumulate> VectorSchemaRootContainer createVectorSchemaContainer(
+    final Map<TKey, TAccumulate> map,
+    FieldVector[] fieldVectors,
+    BufferAllocator allocator,
+    Function4<Integer, FieldVector[], TKey, TAccumulate, Void> resultSelector) {
+    int idx = 0;
+    for (Map.Entry<TKey, TAccumulate> e: map.entrySet()) {
+      resultSelector.apply(idx++, fieldVectors, e.getKey(), e.getValue());
+    }
+    UInt4Vector selectionVector = new UInt4Vector("selectionVector", allocator);
+    VectorSchemaRoot vectorSchemaRoot = new VectorSchemaRoot(Lists.newArrayList(fieldVectors));
+    return new VectorSchemaRootContainerImpl(new VectorSchemaRoot[]{vectorSchemaRoot}, selectionVector);
   }
 }
