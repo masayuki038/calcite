@@ -3,8 +3,10 @@ package org.apache.calcite.adapter.arrow;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.Lists;
 import org.apache.arrow.memory.BufferAllocator;
-import org.apache.arrow.vector.FieldVector;
+import org.apache.arrow.vector.VectorSchemaRoot;
+import org.apache.arrow.vector.util.Text;
 import org.apache.calcite.adapter.enumerable.*;
 import org.apache.calcite.adapter.enumerable.impl.AggAddContextImpl;
 import org.apache.calcite.adapter.enumerable.impl.AggResultContextImpl;
@@ -31,7 +33,10 @@ import org.apache.calcite.util.BuiltInMethod;
 import org.apache.calcite.util.ImmutableBitSet;
 import org.apache.calcite.util.Pair;
 import org.apache.calcite.util.Util;
+import org.codehaus.janino.Java;
 
+import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
 import java.lang.reflect.Type;
 import java.util.*;
 
@@ -40,7 +45,9 @@ import static org.apache.calcite.adapter.arrow.EnumerableUtils.NO_PARAMS;
 public class ArrowAggregate extends Aggregate implements ArrowRel {
 
   private static final ImmutableMap<Type, Type> VECTOR_TYPE_MAP = ImmutableMap.of(
+    int.class, org.apache.arrow.vector.IntVector.class,
     Integer.class, org.apache.arrow.vector.IntVector.class,
+    long.class, org.apache.arrow.vector.BigIntVector.class,
     Long.class, org.apache.arrow.vector.BigIntVector.class,
     String.class, org.apache.arrow.vector.VarCharVector.class
   );
@@ -177,69 +184,6 @@ public class ArrowAggregate extends Aggregate implements ArrowRel {
           Function0.class,
           initBlock.toBlock()));
 
-    final BlockBuilder fieldVectorsInitBlock = new BlockBuilder();
-    Expression rootAllocator =
-      Expressions.parameter(0, BufferAllocator.class, "rootAllocator");
-
-    List<Integer> groupKeys = groupSet.asList();
-    List<ParameterExpression> fieldNames = new ArrayList<>();
-    for (int i = 0; i < groupKeys.size(); i++) {
-      DeclarationStatement fieldName =
-        Expressions.declare(0, "groupKey" + i,
-          Expressions.call(
-            Expressions.variable(ArrowAggregateProcedure.class, "this"),
-            "getFieldVectorName",
-            Expressions.constant(i)));
-      fieldVectorsInitBlock.add(fieldName);
-      fieldNames.add(fieldName.parameter);
-    }
-    for (int i = 0; i < aggs.size(); i++) {
-      String fieldName = aggs.get(i).call.getName() + i;
-      fieldVectorsInitBlock.add(
-        Expressions.declare(0, fieldName,
-          Expressions.constant(fieldName)));
-    }
-
-    DeclarationStatement fieldVectors = Expressions.declare(
-      0, "fieldVectors", Expressions.newArrayInit(FieldVector.class, groupKeys.size() + aggs.size()));
-    fieldVectorsInitBlock.add(fieldVectors);
-
-    int fieldVectorIndex = 0;
-    for (; fieldVectorIndex < groupKeys.size(); fieldVectorIndex++) {
-      Type vectorClazz = VECTOR_TYPE_MAP.get(keyPhysType.fieldClass(fieldVectorIndex));
-      assert (vectorClazz != null);
-      fieldVectorsInitBlock.add(
-        Expressions.assign(
-          Expressions.arrayIndex(fieldVectors.parameter, Expressions.constant(fieldVectorIndex)),
-          Expressions.new_(
-            vectorClazz,
-            fieldNames.get(fieldVectorIndex),
-            rootAllocator)));
-    }
-
-    for (AggImpState agg: aggs) {
-      Type vectorClazz = VECTOR_TYPE_MAP.get(agg.context.returnType());
-      assert (vectorClazz != null);
-      fieldVectorsInitBlock.add(
-        Expressions.assign(
-          Expressions.arrayIndex(fieldVectors.parameter, Expressions.constant(fieldVectorIndex)),
-          Expressions.new_(
-            vectorClazz,
-            Expressions.parameter(0, String.class, "a_" + fieldVectorIndex),
-            rootAllocator)));
-      fieldVectorIndex++;
-    }
-
-    fieldVectorsInitBlock.add(Expressions.return_(null, fieldVectors.parameter));
-
-    final Expression fieldVectorsInitializer =
-      aggregateBuilder.append(
-        "fieldVectorsInitializer",
-        Expressions.lambda(
-          Function1.class,
-          fieldVectorsInitBlock.toBlock(),
-          Expressions.parameter(BufferAllocator.class, "in")));
-
     // Function2<Object[], Employee, Object[]> accumulatorAdder =
     //     new Function2<Object[], Employee, Object[]>() {
     //         public Object[] apply(Object[] acc, Employee in) {
@@ -340,15 +284,104 @@ public class ArrowAggregate extends Aggregate implements ArrowRel {
 //                                    keyPhysType)));
 //    }
 //    resultBlock.add(physType.record(results));
+    List<Integer> groupKeys = groupSet.asList();
+    List<MemberDeclaration> memberDeclarations = new ArrayList<MemberDeclaration>();
 
-    final BlockBuilder resultBlock = new BlockBuilder();
+    // Member Definitions
+    final ParameterExpression[] fieldVectors = new ParameterExpression[groupKeys.size() + aggs.size()];
+    int fieldVectorIndex = 0;
+    for (; fieldVectorIndex < groupKeys.size(); fieldVectorIndex++) {
+      Type vectorClazz = VECTOR_TYPE_MAP.get(keyPhysType.fieldClass(fieldVectorIndex));
+      assert (vectorClazz != null) : "keyPhysType.fieldClass(int): " + keyPhysType.fieldClass(fieldVectorIndex);
+      ParameterExpression member =
+        Expressions.parameter(Modifier.PRIVATE, vectorClazz, "v" + fieldVectorIndex);
+      memberDeclarations.add(new FieldDeclaration(Modifier.PRIVATE, member, Expressions.constant(null)));
+      fieldVectors[fieldVectorIndex] = member;
+    }
+
+    for (AggImpState agg : aggs) {
+      Type vectorClazz = VECTOR_TYPE_MAP.get(agg.context.returnType());
+      assert (vectorClazz != null): "agg.context.returnType: " + agg.context.returnType();
+      ParameterExpression member =
+        Expressions.parameter(Modifier.PRIVATE, vectorClazz, "v" + fieldVectorIndex);
+      memberDeclarations.add(new FieldDeclaration(Modifier.PRIVATE, member, Expressions.constant(null)));
+      fieldVectors[fieldVectorIndex] = member;
+      fieldVectorIndex++;
+    }
+
+    // Init method
+    final BlockBuilder resultInitBlock = new BlockBuilder();
+    ParameterExpression rootAllocator =
+      Expressions.parameter(0, BufferAllocator.class, "rootAllocator");
+
+    List<ParameterExpression> fieldNames = new ArrayList<>();
+    for (int i = 0; i < groupKeys.size(); i++) {
+      DeclarationStatement fieldName =
+        Expressions.declare(0, "groupKey" + i,
+          Expressions.call(
+            Expressions.variable(ArrowAggregateProcedure.class,
+              "org.apache.calcite.adapter.arrow.ArrowAggregateProcedure.this"),
+            "getFieldVectorName",
+            Expressions.constant(i)));
+      resultInitBlock.add(fieldName);
+      fieldNames.add(fieldName.parameter);
+    }
+
+    for (int i = 0; i < aggs.size(); i++) {
+      String fieldName = aggs.get(i).call.getName() + i;
+      resultInitBlock.add(
+        Expressions.declare(0, fieldName,
+          Expressions.constant(fieldName)));
+    }
+
+    for (fieldVectorIndex = 0; fieldVectorIndex < groupKeys.size(); fieldVectorIndex++) {
+      Type vectorClazz = VECTOR_TYPE_MAP.get(keyPhysType.fieldClass(fieldVectorIndex));
+      assert (vectorClazz != null): "keyPhysType.fieldClass(int): " + keyPhysType.fieldClass(fieldVectorIndex);
+      resultInitBlock.add(
+        Expressions.statement(
+          Expressions.assign(
+            fieldVectors[fieldVectorIndex],
+            Expressions.new_(
+              vectorClazz,
+              fieldNames.get(fieldVectorIndex),
+              rootAllocator))));
+    }
+
+    for (AggImpState agg: aggs) {
+      Type vectorClazz = VECTOR_TYPE_MAP.get(agg.context.returnType());
+      assert (vectorClazz != null): "agg.context.returnType: " + agg.context.returnType();
+      resultInitBlock.add(
+        Expressions.statement(
+          Expressions.assign(
+            fieldVectors[fieldVectorIndex],
+            Expressions.new_(
+              vectorClazz,
+              Expressions.constant("a_" + fieldVectorIndex),
+              rootAllocator))));
+      fieldVectorIndex++;
+    }
+    memberDeclarations.add(
+      new MethodDeclaration(Modifier.PUBLIC, "init", void.class,
+        Lists.newArrayList(rootAllocator),
+        resultInitBlock.toBlock()));
+
+    // Apply method
+    final BlockBuilder resultApplyBlock = new BlockBuilder();
+    ParameterExpression a1 = Expressions.parameter(Object.class, "a1");
+    ParameterExpression a2 = Expressions.parameter(Object.class, "a2");
+
     final ParameterExpression key_;
-    Expression idx = Expressions.parameter(0, int.class, "idx");
+    ParameterExpression idx = Expressions.parameter(0, int.class, "idx");
     if (groupCount == 0) {
       key_ = null;
     } else {
       final Type keyType = keyPhysType.getJavaRowType();
-      key_ = Expressions.parameter(keyType, "key");
+
+      DeclarationStatement castKey =
+        Expressions.declare(0, "key", RexToLixTranslator.convert(a1, keyType));
+      key_ = castKey.parameter;
+      resultApplyBlock.add(castKey);
+
       for (fieldVectorIndex = 0; fieldVectorIndex < groupCount; fieldVectorIndex++) {
         Expression groupKey = null;
         if (getGroupType() == Group.SIMPLE) {
@@ -359,27 +392,72 @@ public class ArrowAggregate extends Aggregate implements ArrowRel {
             Expressions.constant(null),
             Expressions.box(groupKey));
         }
-        resultBlock.add(
-          Expressions.call(
-            Expressions.arrayIndex(fieldVectors.parameter, Expressions.constant(fieldVectorIndex)),
-            "set",
-            idx,
-            groupKey));
+        Expression value;
+        if (groupKey.getType() == String.class) {
+          value = Expressions.new_(Text.class, groupKey);
+        } else {
+          value = Expressions.unbox(groupKey);
+        }
+
+        resultApplyBlock.add(
+          Expressions.statement(
+            Expressions.call(fieldVectors[fieldVectorIndex], "set", idx, value)));
       }
     }
 
     for (final AggImpState agg : aggs) {
+      DeclarationStatement castValue =
+        Expressions.declare(0, "acc", RexToLixTranslator.convert(a2, acc_.getType()));
+      resultApplyBlock.add(castValue);
+
       Expression aggRet =
         agg.implementor.implementResult(agg.context,
-          new AggResultContextImpl(resultBlock, agg.call, agg.state, key_, keyPhysType));
-      resultBlock.add(
-        Expressions.call(
-          Expressions.arrayIndex(fieldVectors.parameter, Expressions.constant(fieldVectorIndex)),
-          "set",
-          idx,
-          aggRet));
+          new AggResultContextImpl(resultApplyBlock, agg.call, agg.state, key_, keyPhysType));
+      Expression value;
+      if (aggRet.getType() == String.class) {
+        value = Expressions.new_(Text.class, aggRet);
+      } else {
+        value = Expressions.unbox(aggRet);
+      }
+      resultApplyBlock.add(
+        Expressions.statement(
+          Expressions.call(fieldVectors[fieldVectorIndex], "set", idx, value)));
       fieldVectorIndex++;
     }
+
+    memberDeclarations.add(
+      new MethodDeclaration(Modifier.PUBLIC, "apply", void.class,
+      Lists.newArrayList(idx, a1, a2),
+      resultApplyBlock.toBlock()));
+
+//    BlockBuilder resultApplyBlock2 = new BlockBuilder();
+//
+//    resultApplyBlock2.add(
+//      Expressions.call(
+//        Expressions.variable(ArrowAggregateResultSelector.class, "this"),
+//        "apply",
+//        Lists.newArrayList(idx,
+//          RexToLixTranslator.convert(a1, key_.getType()),
+//          RexToLixTranslator.convert(a2, acc_.getType()))));
+//
+//    memberDeclarations.add(
+//      new MethodDeclaration(Modifier.PUBLIC, "apply", void.class,
+//        Lists.newArrayList(idx, a1, a2),
+//        resultApplyBlock2.toBlock()));
+
+    // Build method
+    final BlockBuilder resultBuildBlock = new BlockBuilder();
+    resultBuildBlock.add(
+      Expressions.return_(
+        null,
+        Expressions.new_(
+          VectorSchemaRoot.class,
+          Expressions.call(Lists.class, "newArrayList", fieldVectors))
+      ));
+    memberDeclarations.add(
+      new MethodDeclaration(Modifier.PUBLIC, "build", VectorSchemaRoot.class,
+        Lists.newArrayList(),
+        resultBuildBlock.toBlock()));
 
     if (getGroupType() != Group.SIMPLE) {
       final List<Expression> list = new ArrayList<>();
@@ -395,7 +473,7 @@ public class ArrowAggregate extends Aggregate implements ArrowRel {
       final Expression resultSelector =
         aggregateBuilder.append("resultSelector",
           Expressions.lambda(Function2.class,
-            resultBlock.toBlock(),
+            resultApplyBlock.toBlock(),
             key_,
             acc_));
       aggregateBuilder.add(
@@ -414,7 +492,7 @@ public class ArrowAggregate extends Aggregate implements ArrowRel {
           "resultSelector",
           Expressions.lambda(
             Function1.class,
-            resultBlock.toBlock(),
+            resultApplyBlock.toBlock(),
             acc_));
       aggregateBuilder.add(
         Expressions.return_(
@@ -444,19 +522,23 @@ public class ArrowAggregate extends Aggregate implements ArrowRel {
           inputPhysType.generateSelector(parameter,
             groupSet.asList(),
             keyPhysType.getFormat()));
+//      final Expression resultSelector_ =
+//        aggregateBuilder.append("resultSelector",
+//          Expressions.lambda(Function2.class,
+//            resultApplyBlock.toBlock(),
+//            key_,
+//            acc_));
       final Expression resultSelector_ =
-        aggregateBuilder.append("resultSelector",
-          Expressions.lambda(Function2.class,
-            resultBlock.toBlock(),
-            key_,
-            acc_));
+        Expressions.new_(
+          ArrowAggregateResultSelector.class,
+          Lists.newArrayList(),
+          memberDeclarations);
       aggregateBuilder.add(
         Expressions.return_(null,
           Expressions.call(childExp,
             BuiltInMethod.GROUP_BY2.method,
             Expressions.list(keySelector_,
               accumulatorInitializer,
-              fieldVectorsInitializer,
               accumulatorAdder,
               resultSelector_)
               .appendIfNotNull(keyPhysType.comparer()))));
