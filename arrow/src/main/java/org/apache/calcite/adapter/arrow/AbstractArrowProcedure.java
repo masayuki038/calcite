@@ -47,24 +47,46 @@ abstract public class AbstractArrowProcedure<T> implements ArrowProcedure<T> {
       final ArrowAggregateAccumulatorAdder<TAccumulate> accumulatorAdder,
       final ArrowAggregateResultSelector resultSelector) {
     BufferAllocator allocator = new RootAllocator(Long.MAX_VALUE);
-    for (int i = 0; i < this.input.getVectorSchemaRootCount(); i++) {
-      for (int j = 0; j < this.input.getRowCount(i); j++) {
-        TKey key = keySelector.getKey(this.input, i, j);
-        TAccumulate accumulator = map.get(key);
-        if (accumulator == null) {
-          accumulator = accumulatorInitializer.apply();
-          accumulator = accumulatorAdder.add(accumulator, this.input, i, j);
-          map.put(key, accumulator);
-        } else {
-          TAccumulate accumulator0 = accumulator;
-          accumulator = accumulatorAdder.add(accumulator, this.input, i, j);
-          if (accumulator != accumulator0) {
-            map.put(key, accumulator);
-          }
+
+    UInt4Vector selectionVector = this.input.selectionVector();
+    int i, j;
+    if (selectionVector.getValueCount() > 0) {
+      for (int sIndex = 0; sIndex < selectionVector.getValueCount(); sIndex++) {
+        int bIndex = selectionVector.getObject(sIndex);
+        i = bIndex & 0xffff0000;
+        j = bIndex & 0x0000ffff;
+        add(map, keySelector, accumulatorInitializer, accumulatorAdder, i, j);
+      }
+    } else {
+      for (i = 0; i < this.input.getVectorSchemaRootCount(); i++) {
+        for (j = 0; j < this.input.getRowCount(i); j++) {
+          add(map, keySelector, accumulatorInitializer, accumulatorAdder, i, j);
         }
       }
     }
     return createVectorSchemaContainer(map, allocator, resultSelector);
+  }
+
+  private <TKey, TAccumulate> void add(
+    Map<TKey, TAccumulate> map,
+    ArrowAggregateKeySelector<TKey> keySelector,
+    Function0<TAccumulate> accumulatorInitializer,
+    ArrowAggregateAccumulatorAdder<TAccumulate> accumulatorAdder,
+    int i,
+    int j) {
+    TKey key = keySelector.getKey(this.input, i, j);
+    TAccumulate accumulator = map.get(key);
+    if (accumulator == null) {
+      accumulator = accumulatorInitializer.apply();
+      accumulator = accumulatorAdder.add(accumulator, this.input, i, j);
+      map.put(key, accumulator);
+    } else {
+      TAccumulate accumulator0 = accumulator;
+      accumulator = accumulatorAdder.add(accumulator, this.input, i, j);
+      if (accumulator != accumulator0) {
+        map.put(key, accumulator);
+      }
+    }
   }
 
   private <TKey, TAccumulate> VectorSchemaRootContainer createVectorSchemaContainer(
