@@ -10,7 +10,7 @@ import org.apache.calcite.linq4j.Enumerator;
 public class ArrowToEnumerableEnumerator implements Enumerator {
 
   private int rootIndex = 0;
-  private int vectorIndex = 0;
+  private int vectorIndex = -1;
   private int selectionVectorIndex = 0;
   private VectorSchemaRootContainer container;
 
