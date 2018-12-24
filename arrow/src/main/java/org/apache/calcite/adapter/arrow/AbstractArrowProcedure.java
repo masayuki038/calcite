@@ -13,7 +13,7 @@ import org.apache.calcite.linq4j.function.Function2;
 import java.util.HashMap;
 import java.util.Map;
 
-abstract public class AbstractArrowProcedure<T> implements ArrowProcedure {
+abstract public class AbstractArrowProcedure<T> implements ArrowProcedure<T> {
 
   protected VectorSchemaRootContainer input;
 
@@ -28,13 +28,12 @@ abstract public class AbstractArrowProcedure<T> implements ArrowProcedure {
   }
 
   public <TKey, TAccumulate> VectorSchemaRootContainer groupBy(
-      final Function1<T, TKey> keySelector,
+      final ArrowAggregateKeySelector<TKey> keySelector,
       final Function0<TAccumulate> accumulatorInitializer,
-      final Function2<TAccumulate, T, TAccumulate> accumulatorAdder,
+      final ArrowAggregateAccumulatorAdder<TAccumulate> accumulatorAdder,
       final ArrowAggregateResultSelector resultSelector) {
     return groupBy_(
       new HashMap<TKey, TAccumulate>(),
-      null,
       keySelector,
       accumulatorInitializer,
       accumulatorAdder,
@@ -43,24 +42,22 @@ abstract public class AbstractArrowProcedure<T> implements ArrowProcedure {
 
   private  <TKey, TAccumulate> VectorSchemaRootContainer groupBy_(
       final Map<TKey, TAccumulate> map,
-      final Enumerable<T> enumerable,
-      final Function1<T, TKey> keySelector,
+      final ArrowAggregateKeySelector<TKey> keySelector,
       final Function0<TAccumulate> accumulatorInitializer,
-      final Function2<TAccumulate, T, TAccumulate> accumulatorAdder,
+      final ArrowAggregateAccumulatorAdder<TAccumulate> accumulatorAdder,
       final ArrowAggregateResultSelector resultSelector) {
     BufferAllocator allocator = new RootAllocator(Long.MAX_VALUE);
-    try (Enumerator<T> os = enumerable.enumerator()) {
-      while (os.moveNext()) {
-        T o = os.current();
-        TKey key = keySelector.apply(o);
+    for (int i = 0; i < this.input.getVectorSchemaRootCount(); i++) {
+      for (int j = 0; j < this.input.getRowCount(i); j++) {
+        TKey key = keySelector.getKey(this.input, i, j);
         TAccumulate accumulator = map.get(key);
         if (accumulator == null) {
           accumulator = accumulatorInitializer.apply();
-          accumulator = accumulatorAdder.apply(accumulator, o);
+          accumulator = accumulatorAdder.add(accumulator, this.input, i, j);
           map.put(key, accumulator);
         } else {
           TAccumulate accumulator0 = accumulator;
-          accumulator = accumulatorAdder.apply(accumulator, o);
+          accumulator = accumulatorAdder.add(accumulator, this.input, i, j);
           if (accumulator != accumulator0) {
             map.put(key, accumulator);
           }
@@ -74,11 +71,14 @@ abstract public class AbstractArrowProcedure<T> implements ArrowProcedure {
     final Map<TKey, TAccumulate> map,
     BufferAllocator allocator,
     ArrowAggregateResultSelector resultSelector) {
+
+    resultSelector.init(allocator);
+
     int idx = 0;
     for (Map.Entry<TKey, TAccumulate> e: map.entrySet()) {
       resultSelector.apply(idx++, e.getKey(), e.getValue());
     }
-    VectorSchemaRoot vectorSchemaRoot = resultSelector.build();
+    VectorSchemaRoot vectorSchemaRoot = resultSelector.build(idx);
     UInt4Vector selectionVector = new UInt4Vector("selectionVector", allocator);
     return new VectorSchemaRootContainerImpl(new VectorSchemaRoot[]{vectorSchemaRoot}, selectionVector);
   }

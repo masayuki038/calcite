@@ -28,14 +28,12 @@ import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rel.type.RelDataTypeField;
 import org.apache.calcite.rex.RexInputRef;
 import org.apache.calcite.rex.RexNode;
+import org.apache.calcite.runtime.FlatLists;
 import org.apache.calcite.sql.SqlAggFunction;
 import org.apache.calcite.util.BuiltInMethod;
 import org.apache.calcite.util.ImmutableBitSet;
-import org.apache.calcite.util.Pair;
 import org.apache.calcite.util.Util;
-import org.codehaus.janino.Java;
 
-import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.lang.reflect.Type;
 import java.util.*;
@@ -97,13 +95,13 @@ public class ArrowAggregate extends Aggregate implements ArrowRel {
     final Result result = implementor.visitChild(0, child);
     Expression childExp = builder.append("inputEnumerator", result.block, false);
 
-    final PhysType physType = PhysTypeImpl.of(typeFactory, getRowType(), pref.preferCustom());
+    final PhysType physType = PhysType.of(typeFactory, getRowType(), pref.preferCustom());
     final PhysType inputPhysType = result.physType;
 
     ParameterExpression parameter = Expressions.parameter(inputPhysType.getJavaRowType(), "a0");
 
     final PhysType keyPhysType =
-      inputPhysType.project(groupSet.asList(), getGroupType() != Group.SIMPLE, JavaRowFormat.LIST);
+      inputPhysType.project(groupSet.asList(), true, JavaRowFormat.LIST);
     final int groupCount = getGroupCount();
 
     final List<AggImpState> aggs = new ArrayList<>(aggCalls.size());
@@ -146,7 +144,7 @@ public class ArrowAggregate extends Aggregate implements ArrowRel {
     }
 
     final PhysType accPhysType =
-      PhysTypeImpl.of(typeFactory,
+      PhysType.of(typeFactory,
         typeFactory.createSyntheticType(aggStateTypes));
 
 
@@ -193,10 +191,18 @@ public class ArrowAggregate extends Aggregate implements ArrowRel {
     //         }
     //     };
     final BlockBuilder builder2 = new BlockBuilder();
-    final ParameterExpression inParameter =
-      Expressions.parameter(inputPhysType.getJavaRowType(), "in");
     final ParameterExpression acc_ =
       Expressions.parameter(accPhysType.getJavaRowType(), "acc");
+    final ParameterExpression input_ =
+      Expressions.parameter(VectorSchemaRootContainer.class, "input");
+    final ParameterExpression i_ = Expressions.parameter(int.class, "i");
+    final ParameterExpression j_ = Expressions.parameter(int.class, "j");
+
+    ParameterExpression obj = Expressions.parameter(Object.class, "acc_");
+    builder2.add(
+      Expressions.declare(0, "acc",
+        RexToLixTranslator.convert(obj, Object.class, accPhysType.getJavaRowType())));
+
     for (int i = 0, stateOffset = 0; i < aggs.size(); i++) {
       final AggImpState agg = aggs.get(i);
 
@@ -229,26 +235,30 @@ public class ArrowAggregate extends Aggregate implements ArrowRel {
           }
 
           public RexToLixTranslator rowTranslator() {
-            return RexToLixTranslator.forAggregation(typeFactory,
+            return RexToLixTranslator.forAggregation(
+              typeFactory,
               currentBlock(),
-              new RexToLixTranslator.InputGetterImpl(
-                                                      Collections.singletonList(
-                                                        Pair.of((Expression) inParameter, inputPhysType))))
-                     .setNullable(currentNullables());
+              new ArrowInputGetterImpl(inputPhysType)
+            ).setNullable(currentNullables());
           }
         };
 
       agg.implementor.implementAdd(agg.context, addContext);
     }
+
     builder2.add(acc_);
+
+    List<MemberDeclaration> memberDeclarations = new ArrayList<>();
+    memberDeclarations.add(
+      new MethodDeclaration(Modifier.PUBLIC, "add", accPhysType.getJavaRowType(),
+                             Lists.newArrayList(obj, input_, i_, j_),
+                             builder2.toBlock()));
+
     final Expression accumulatorAdder =
-      aggregateBuilder.append(
-        "accumulatorAdder",
-        Expressions.lambda(
-          Function2.class,
-          builder2.toBlock(),
-          acc_,
-          inParameter));
+      Expressions.new_(
+        ArrowAggregateAccumulatorAdder.class,
+        Lists.newArrayList(),
+        memberDeclarations);
 
     // Function2<Integer, Object[], Object[]> resultSelector =
     //     new Function2<Integer, Object[], Object[]>() {
@@ -285,7 +295,7 @@ public class ArrowAggregate extends Aggregate implements ArrowRel {
 //    }
 //    resultBlock.add(physType.record(results));
     List<Integer> groupKeys = groupSet.asList();
-    List<MemberDeclaration> memberDeclarations = new ArrayList<MemberDeclaration>();
+    memberDeclarations = new ArrayList<MemberDeclaration>();
 
     // Member Definitions
     final ParameterExpression[] fieldVectors = new ParameterExpression[groupKeys.size() + aggs.size()];
@@ -345,6 +355,10 @@ public class ArrowAggregate extends Aggregate implements ArrowRel {
               vectorClazz,
               fieldNames.get(fieldVectorIndex),
               rootAllocator))));
+
+      resultInitBlock.add(
+        Expressions.statement(
+          Expressions.call(fieldVectors[fieldVectorIndex], "allocateNew", Lists.newArrayList())));
     }
 
     for (AggImpState agg: aggs) {
@@ -358,6 +372,11 @@ public class ArrowAggregate extends Aggregate implements ArrowRel {
               vectorClazz,
               Expressions.constant("a_" + fieldVectorIndex),
               rootAllocator))));
+
+      resultInitBlock.add(
+        Expressions.statement(
+          Expressions.call(fieldVectors[fieldVectorIndex], "allocateNew", Lists.newArrayList())));
+
       fieldVectorIndex++;
     }
     memberDeclarations.add(
@@ -447,16 +466,26 @@ public class ArrowAggregate extends Aggregate implements ArrowRel {
 
     // Build method
     final BlockBuilder resultBuildBlock = new BlockBuilder();
+    ParameterExpression valueCount = Expressions.parameter(int.class, "valueCount");
+    for (ParameterExpression fieldVector: fieldVectors) {
+      resultBuildBlock.add(
+        Expressions.statement(
+          Expressions.call(fieldVector, "setValueCount", valueCount)));
+    }
+    DeclarationStatement decl = Expressions.declare(0, "vectorSchemaRoot", Expressions.new_(
+      VectorSchemaRoot.class,
+      Expressions.call(Lists.class, "newArrayList", fieldVectors))
+    );
+    resultBuildBlock.add(decl);
     resultBuildBlock.add(
-      Expressions.return_(
-        null,
-        Expressions.new_(
-          VectorSchemaRoot.class,
-          Expressions.call(Lists.class, "newArrayList", fieldVectors))
-      ));
+      Expressions.statement(
+        Expressions.call(decl.parameter, "setRowCount", valueCount)));
+    resultBuildBlock.add(
+      Expressions.return_(null, decl.parameter));
+
     memberDeclarations.add(
       new MethodDeclaration(Modifier.PUBLIC, "build", VectorSchemaRoot.class,
-        Lists.newArrayList(),
+        Lists.newArrayList(valueCount),
         resultBuildBlock.toBlock()));
 
     if (getGroupType() != Group.SIMPLE) {
@@ -519,7 +548,9 @@ public class ArrowAggregate extends Aggregate implements ArrowRel {
     } else {
       final Expression keySelector_ =
         aggregateBuilder.append("keySelector",
-          inputPhysType.generateSelector(parameter,
+          generateSelector(
+            inputPhysType,
+            parameter,
             groupSet.asList(),
             keyPhysType.getFormat()));
 //      final Expression resultSelector_ =
@@ -557,6 +588,44 @@ public class ArrowAggregate extends Aggregate implements ArrowRel {
     String variableName = "e" + implementor.getAndIncrementSuffix();
     builder.append(variableName, body);
     return implementor.result(variableName, physType, builder.toBlock());
+  }
+
+  // TODO Move this method to PhysTypeImpl
+  public Expression generateSelector(
+    PhysType physType,
+    ParameterExpression parameter,
+    List<Integer> fields,
+    JavaRowFormat targetFormat) {
+    // Optimize target format
+    switch (fields.size()) {
+      case 0:
+        targetFormat = JavaRowFormat.LIST;
+        break;
+      case 1:
+        targetFormat = JavaRowFormat.SCALAR;
+        break;
+    }
+
+    BlockBuilder keySelector = new BlockBuilder();
+
+    RexToLixTranslator.InputGetter inputGetter = new ArrowInputGetterImpl(physType);
+    final List<Expression> keys = new ArrayList<>();
+    for (int field: fields) {
+      keys.add(inputGetter.field(keySelector, field, null));
+    }
+
+    keySelector.add(Expressions.call(FlatLists.class, "of", keys));
+    List<MemberDeclaration> memberDeclarations = new ArrayList<>();
+    memberDeclarations.add(
+      new MethodDeclaration(Modifier.PUBLIC, "getKey", java.util.List.class,
+                             Lists.newArrayList(
+                               Expressions.parameter(VectorSchemaRootContainer.class, "input"),
+                               Expressions.parameter(int.class, "i"),
+                               Expressions.parameter(int.class, "j")),
+                             keySelector.toBlock()));
+
+    return Expressions.new_(
+      ArrowAggregateKeySelector.class, Lists.newArrayList(), memberDeclarations);
   }
 
   public class AggContextImpl implements AggContext {

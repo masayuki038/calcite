@@ -33,11 +33,21 @@ public class JdbcTest {
   }
 
   @Test
-  public void filterAndGrouping() throws SQLException, ClassNotFoundException {
+  public void filterAndCounting() throws SQLException, ClassNotFoundException {
     Class.forName("org.apache.calcite.jdbc.Driver");
     try (Connection conn = DriverManager.getConnection("jdbc:calcite:model=target/classes/samples/model.json", "admin", "admin")) {
       PreparedStatement pstmt = conn.prepareStatement("select count(*), N_NATIONKEY, N_NAME from NATIONSSF WHERE N_REGIONKEY=? GROUP BY N_NATIONKEY, N_NAME");
       pstmt.setLong(1, 1L);
+      ResultSet rs = pstmt.executeQuery();
+      resultSetPrint(rs);
+    }
+  }
+
+  @Test
+  public void max() throws SQLException, ClassNotFoundException {
+    Class.forName("org.apache.calcite.jdbc.Driver");
+    try (Connection conn = DriverManager.getConnection("jdbc:calcite:model=target/classes/samples/model.json", "admin", "admin")) {
+      PreparedStatement pstmt = conn.prepareStatement("select N_REGIONKEY, MAX(N_NAME) from NATIONSSF GROUP BY N_REGIONKEY");
       ResultSet rs = pstmt.executeQuery();
       resultSetPrint(rs);
     }

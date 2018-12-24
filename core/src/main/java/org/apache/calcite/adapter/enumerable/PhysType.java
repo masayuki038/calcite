@@ -16,6 +16,7 @@
  */
 package org.apache.calcite.adapter.enumerable;
 
+import org.apache.calcite.adapter.java.JavaTypeFactory;
 import org.apache.calcite.linq4j.tree.Expression;
 import org.apache.calcite.linq4j.tree.ParameterExpression;
 import org.apache.calcite.rel.RelCollation;
@@ -200,6 +201,19 @@ public interface PhysType {
   /** Converts an enumerable of this physical type to an enumerable that uses a
    * given physical type for its rows. */
   Expression convertTo(Expression expression, PhysType targetPhysType);
+
+  static PhysType of(
+    JavaTypeFactory typeFactory,
+    RelDataType rowType,
+    JavaRowFormat format) {
+    return PhysTypeImpl.of(typeFactory, rowType, format, true);
+  }
+
+  static PhysType of(
+    final JavaTypeFactory typeFactory,
+    Type javaRowClass) {
+    return PhysTypeImpl.of(typeFactory, javaRowClass);
+  }
 }
 
 // End PhysType.java

@@ -50,7 +50,7 @@ public interface ArrowRel extends RelNode {
     }
 
     public Result result(String variableName, PhysType physType, BlockStatement block) {
-      return new Result(block, physType, ((PhysTypeImpl) physType).getFormat(), variableName);
+      return new Result(block, physType, physType.getFormat(), variableName);
     }
 
     public RexToLixTranslator.InputGetter getCorrelVariableGetter(String name) {

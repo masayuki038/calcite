@@ -2,7 +2,6 @@ package org.apache.calcite.adapter.arrow;
 
 import org.apache.calcite.adapter.enumerable.EnumerableRel;
 import org.apache.calcite.adapter.enumerable.PhysType;
-import org.apache.calcite.adapter.enumerable.PhysTypeImpl;
 import org.apache.calcite.linq4j.tree.BlockBuilder;
 import org.apache.calcite.linq4j.tree.Expression;
 import org.apache.calcite.linq4j.tree.Expressions;
@@ -69,7 +68,7 @@ public class ArrowTableScan extends TableScan implements ArrowRel {
   }
 
   public Result implement(ArrowImplementor arrowImplementor, EnumerableRel.Prefer pref) {
-    PhysType physType = PhysTypeImpl.of(arrowImplementor.getTypeFactory(), getRowType(), pref.preferArray());
+    PhysType physType = PhysType.of(arrowImplementor.getTypeFactory(), getRowType(), pref.preferArray());
     String param = "_e" + arrowImplementor.getAndIncrementSuffix();
     BlockBuilder builder = new BlockBuilder();
     Expression call = Expressions.call(

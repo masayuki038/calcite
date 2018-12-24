@@ -69,7 +69,7 @@ public class ArrowToEnumerableConverter extends ConverterImpl
               NO_PARAMS,
               Blocks.toFunctionBlock(g))))));
 
-    final PhysType physType = PhysTypeImpl.of(
+    final PhysType physType = PhysType.of(
       implementor.getTypeFactory(), rowType, pref.prefer(JavaRowFormat.ARRAY));
     return implementor.result(physType, builder.toBlock());
   }

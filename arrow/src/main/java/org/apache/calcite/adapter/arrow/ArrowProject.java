@@ -2,7 +2,6 @@ package org.apache.calcite.adapter.arrow;
 
 import org.apache.calcite.adapter.enumerable.EnumerableRel;
 import org.apache.calcite.adapter.enumerable.PhysType;
-import org.apache.calcite.adapter.enumerable.PhysTypeImpl;
 import org.apache.calcite.adapter.java.JavaTypeFactory;
 import org.apache.calcite.linq4j.tree.*;
 import org.apache.calcite.plan.RelOptCluster;
@@ -46,7 +45,7 @@ public class ArrowProject extends Project implements ArrowRel {
     final BlockBuilder builder = new BlockBuilder();
     final ArrowRel child = (ArrowRel) this.input;
     final Result result = arrowImplementor.visitChild(0, child);
-    final PhysType physType = PhysTypeImpl.of(typeFactory, getRowType(), pref.prefer(result.format));
+    final PhysType physType = PhysType.of(typeFactory, getRowType(), pref.prefer(result.format));
 
     List<String> fieldNames = getRowType().getFieldNames();
     BlockBuilder projectedIndexesBody = new BlockBuilder();

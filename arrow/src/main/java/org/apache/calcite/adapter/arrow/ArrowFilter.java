@@ -51,7 +51,7 @@ public class ArrowFilter extends Calc implements ArrowRel {
     final ArrowRel child = (ArrowRel) getInput();
 
     final Result result = arrowImplementor.visitChild(0, child);
-    final PhysType physType = PhysTypeImpl.of(typeFactory, getRowType(), pref.prefer(result.format));
+    final PhysType physType = PhysType.of(typeFactory, getRowType(), pref.prefer(result.format));
     Type outputJavaType = physType.getJavaRowType();
 
     final Type arrowFilterProcessor =
