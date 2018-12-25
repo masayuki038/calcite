@@ -12,10 +12,20 @@ import java.util.stream.IntStream;
 public class JdbcTest {
 
   @Test
-  public void all() throws SQLException, ClassNotFoundException {
+  public void nationsAll() throws SQLException, ClassNotFoundException {
     Class.forName("org.apache.calcite.jdbc.Driver");
     try (Connection conn = DriverManager.getConnection("jdbc:calcite:model=target/classes/samples/model.json", "admin", "admin")) {
       PreparedStatement pstmt = conn.prepareStatement("select N_NATIONKEY, N_NAME, N_REGIONKEY from NATIONSSF");
+      ResultSet rs = pstmt.executeQuery();
+      resultSetPrint(rs);
+    }
+  }
+
+  @Test
+  public void regionsAll() throws SQLException, ClassNotFoundException {
+    Class.forName("org.apache.calcite.jdbc.Driver");
+    try (Connection conn = DriverManager.getConnection("jdbc:calcite:model=target/classes/samples/model.json", "admin", "admin")) {
+      PreparedStatement pstmt = conn.prepareStatement("select * from REGIONSSF");
       ResultSet rs = pstmt.executeQuery();
       resultSetPrint(rs);
     }
@@ -59,6 +69,16 @@ public class JdbcTest {
     try (Connection conn = DriverManager.getConnection("jdbc:calcite:model=target/classes/samples/model.json", "admin", "admin")) {
       PreparedStatement pstmt = conn.prepareStatement("explain plan for select N_NATIONKEY, N_NAME from NATIONSSF WHERE N_REGIONKEY=?");
       pstmt.setLong(1, 1L);
+      ResultSet rs = pstmt.executeQuery();
+      resultSetPrint(rs);
+    }
+  }
+
+  @Test
+  public void innerJoin() throws SQLException, ClassNotFoundException {
+    Class.forName("org.apache.calcite.jdbc.Driver");
+    try (Connection conn = DriverManager.getConnection("jdbc:calcite:model=target/classes/samples/model.json", "admin", "admin")) {
+      PreparedStatement pstmt = conn.prepareStatement("select R.R_NAME, N.N_NATIONKEY, N.N_NAME from NATIONSSF N inner join REGIONSSF R on N.N_REGIONKEY=R.R_REGIONKEY");
       ResultSet rs = pstmt.executeQuery();
       resultSetPrint(rs);
     }
