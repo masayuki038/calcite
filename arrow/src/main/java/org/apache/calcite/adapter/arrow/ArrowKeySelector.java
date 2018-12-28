@@ -1,5 +1,5 @@
 package org.apache.calcite.adapter.arrow;
 
-public interface ArrowAggregateKeySelector<T> {
+public interface ArrowKeySelector<T> {
   <TKey> TKey getKey(VectorSchemaRootContainer input, int i, int j);
 }

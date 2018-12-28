@@ -625,7 +625,7 @@ public class ArrowAggregate extends Aggregate implements ArrowRel {
                              keySelector.toBlock()));
 
     return Expressions.new_(
-      ArrowAggregateKeySelector.class, Lists.newArrayList(), memberDeclarations);
+      ArrowKeySelector.class, Lists.newArrayList(), memberDeclarations);
   }
 
   public class AggContextImpl implements AggContext {

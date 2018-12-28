@@ -4,11 +4,7 @@ import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.RootAllocator;
 import org.apache.arrow.vector.UInt4Vector;
 import org.apache.arrow.vector.VectorSchemaRoot;
-import org.apache.calcite.linq4j.Enumerable;
-import org.apache.calcite.linq4j.Enumerator;
 import org.apache.calcite.linq4j.function.Function0;
-import org.apache.calcite.linq4j.function.Function1;
-import org.apache.calcite.linq4j.function.Function2;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -28,7 +24,7 @@ abstract public class AbstractArrowProcedure<T> implements ArrowProcedure<T> {
   }
 
   public <TKey, TAccumulate> VectorSchemaRootContainer groupBy(
-      final ArrowAggregateKeySelector<TKey> keySelector,
+      final ArrowKeySelector<TKey> keySelector,
       final Function0<TAccumulate> accumulatorInitializer,
       final ArrowAggregateAccumulatorAdder<TAccumulate> accumulatorAdder,
       final ArrowAggregateResultSelector resultSelector) {
@@ -42,7 +38,7 @@ abstract public class AbstractArrowProcedure<T> implements ArrowProcedure<T> {
 
   private  <TKey, TAccumulate> VectorSchemaRootContainer groupBy_(
       final Map<TKey, TAccumulate> map,
-      final ArrowAggregateKeySelector<TKey> keySelector,
+      final ArrowKeySelector<TKey> keySelector,
       final Function0<TAccumulate> accumulatorInitializer,
       final ArrowAggregateAccumulatorAdder<TAccumulate> accumulatorAdder,
       final ArrowAggregateResultSelector resultSelector) {
@@ -69,7 +65,7 @@ abstract public class AbstractArrowProcedure<T> implements ArrowProcedure<T> {
 
   private <TKey, TAccumulate> void add(
     Map<TKey, TAccumulate> map,
-    ArrowAggregateKeySelector<TKey> keySelector,
+    ArrowKeySelector<TKey> keySelector,
     Function0<TAccumulate> accumulatorInitializer,
     ArrowAggregateAccumulatorAdder<TAccumulate> accumulatorAdder,
     int i,
