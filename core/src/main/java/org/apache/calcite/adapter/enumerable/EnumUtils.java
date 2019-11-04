@@ -119,7 +119,7 @@ public class EnumUtils {
     };
   }
 
-  static Expression joinSelector(JoinRelType joinType, PhysType physType,
+  public static Expression joinSelector(JoinRelType joinType, PhysType physType,
       List<PhysType> inputPhysTypes) {
     // A parameter for each input.
     final List<ParameterExpression> parameters = new ArrayList<>();

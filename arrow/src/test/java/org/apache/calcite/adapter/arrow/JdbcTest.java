@@ -38,7 +38,7 @@ public class JdbcTest {
   @Test
   public void filter() throws SQLException, ClassNotFoundException {
     Class.forName("org.apache.calcite.jdbc.Driver");
-    try (Connection conn = DriverManager.getConnection("jdbc:calcite:model=target/classes/samples/model.json", "admin", "admin")) {
+    try (Connection conn = DriverManager.getConnection("jdbc:calcite:model=target/classes/samples/model.json", "foo", "bar")) {
       PreparedStatement pstmt = conn.prepareStatement("select N_REGIONKEY, N_NATIONKEY, N_NAME from NATIONSSF WHERE N_REGIONKEY=?");
       pstmt.setLong(1, 1L);
       ResultSet rs = pstmt.executeQuery();
@@ -62,6 +62,16 @@ public class JdbcTest {
     Class.forName("org.apache.calcite.jdbc.Driver");
     try (Connection conn = DriverManager.getConnection("jdbc:calcite:model=target/classes/samples/model.json", "admin", "admin")) {
       PreparedStatement pstmt = conn.prepareStatement("select N_REGIONKEY, MAX(N_NAME) from NATIONSSF GROUP BY N_REGIONKEY");
+      ResultSet rs = pstmt.executeQuery();
+      resultSetPrint(rs);
+    }
+  }
+
+  @Test
+  public void test() throws SQLException, ClassNotFoundException {
+    Class.forName("org.apache.calcite.jdbc.Driver");
+    try (Connection conn = DriverManager.getConnection("jdbc:calcite:model=target/classes/samples/model.json", "admin", "admin")) {
+      PreparedStatement pstmt = conn.prepareStatement("select sum(N_NATIONKEY) from NATIONSSF");
       ResultSet rs = pstmt.executeQuery();
       resultSetPrint(rs);
     }

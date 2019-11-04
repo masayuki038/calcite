@@ -52,7 +52,7 @@ import static org.apache.calcite.adapter.enumerable.EnumUtils.javaRowClass;
 import static org.apache.calcite.adapter.enumerable.EnumUtils.overridingMethodDecl;
 
 /** Implementation of {@link PhysType}. */
-class PhysTypeImpl implements PhysType {
+public class PhysTypeImpl implements PhysType {
   private final JavaTypeFactory typeFactory;
   private final RelDataType rowType;
   private final Type javaRowClass;
